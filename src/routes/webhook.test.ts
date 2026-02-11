@@ -13,6 +13,11 @@ const { mockPrisma } = vi.hoisted(() => ({
     stripeWebhookEvent: { create: vi.fn() },
     appSecret: { findUnique: vi.fn() },
     jtiUsage: { create: vi.fn() },
+    teamSubscription: { upsert: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+    billingEntity: { findUnique: vi.fn() },
+    plan: { findUnique: vi.fn() },
+    ledgerAccount: { findUnique: vi.fn(), create: vi.fn() },
+    ledgerEntry: { create: vi.fn() },
     $disconnect: vi.fn(),
   },
 }));

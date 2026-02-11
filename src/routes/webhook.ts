@@ -2,7 +2,6 @@ import { FastifyInstance } from "fastify";
 import {
   WebhookService,
   WebhookSignatureError,
-  DuplicateWebhookEventError,
 } from "../services/webhook.service.js";
 
 export async function webhookRoutes(app: FastifyInstance): Promise<void> {
@@ -67,7 +66,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // 4. Route the event to domain handlers
-    const handled = webhookService.routeEvent(event);
+    const handled = await webhookService.routeEvent(event);
 
     request.log.info(
       { eventId: event.id, eventType: event.type, handled, requestId },

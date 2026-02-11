@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { getPrismaClient } from "../lib/prisma.js";
 import { getStripeClient } from "../lib/stripe.js";
+import { SubscriptionHandlerService } from "./subscription-handler.service.js";
 
 export class WebhookSignatureError extends Error {
   constructor(message: string) {
@@ -28,6 +29,13 @@ const HANDLED_EVENT_TYPES = new Set([
 ]);
 
 export class WebhookService {
+  private subscriptionHandler: SubscriptionHandlerService;
+
+  constructor(subscriptionHandler?: SubscriptionHandlerService) {
+    this.subscriptionHandler =
+      subscriptionHandler ?? new SubscriptionHandlerService();
+  }
+
   /**
    * Verify the Stripe webhook signature and construct the event object.
    * Requires the raw request body (Buffer) — the body must NOT be JSON-parsed
@@ -86,7 +94,32 @@ export class WebhookService {
    * Returns true if the event type is handled, false if it's acknowledged
    * but not processed (unsupported event type).
    */
-  routeEvent(event: Stripe.Event): boolean {
-    return HANDLED_EVENT_TYPES.has(event.type);
+  async routeEvent(event: Stripe.Event): Promise<boolean> {
+    if (!HANDLED_EVENT_TYPES.has(event.type)) {
+      return false;
+    }
+
+    switch (event.type) {
+      case "checkout.session.completed":
+        await this.subscriptionHandler.handleCheckoutSessionCompleted(event);
+        break;
+      case "customer.subscription.created":
+      case "customer.subscription.updated":
+        await this.subscriptionHandler.handleSubscriptionUpdated(event);
+        break;
+      case "customer.subscription.deleted":
+        await this.subscriptionHandler.handleSubscriptionDeleted(event);
+        break;
+      case "invoice.paid":
+        await this.subscriptionHandler.handleInvoicePaid(event);
+        break;
+      case "invoice.payment_failed":
+        await this.subscriptionHandler.handleInvoicePaymentFailed(event);
+        break;
+      // payment_intent.succeeded and payment_intent.failed are acknowledged
+      // but handled by future wallet top-up implementation
+    }
+
+    return true;
   }
 }

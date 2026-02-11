@@ -123,7 +123,9 @@ model BillingEntity {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  team Team? @relation(fields: [teamId], references: [id])
+  team           Team?          @relation(fields: [teamId], references: [id])
+  ledgerAccounts LedgerAccount[]
+  ledgerEntries  LedgerEntry[]
 }
 
 model ExternalTeamRef {
@@ -182,8 +184,9 @@ model Plan {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  app              App               @relation(fields: [appId], references: [id])
+  app               App                @relation(fields: [appId], references: [id])
   stripeProductMaps StripeProductMap[]
+  subscriptions     TeamSubscription[]
 
   @@unique([appId, code])
 }
@@ -202,6 +205,99 @@ model StripeProductMap {
   plan Plan? @relation(fields: [planId], references: [id])
 
   @@unique([appId, stripePriceId])
+}
+
+// ─── Team Subscriptions ────────────────────────────────────────────────────
+
+enum TeamSubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+  TRIALING
+  UNPAID
+}
+
+model TeamSubscription {
+  id                    String                 @id @default(uuid())
+  teamId                String
+  stripeSubscriptionId  String                 @unique
+  status                TeamSubscriptionStatus
+  planId                String
+  currentPeriodStart    DateTime
+  currentPeriodEnd      DateTime
+  seatsQuantity         Int                    @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plan Plan @relation(fields: [planId], references: [id])
+
+  @@index([teamId])
+}
+
+// ─── Ledger ────────────────────────────────────────────────────────────────
+
+enum LedgerAccountType {
+  WALLET
+  ACCOUNTS_RECEIVABLE
+  REVENUE
+  COGS
+  TAX
+}
+
+enum LedgerEntryType {
+  TOPUP
+  SUBSCRIPTION_CHARGE
+  USAGE_CHARGE
+  REFUND
+  ADJUSTMENT
+  INVOICE_PAYMENT
+  COGS_ACCRUAL
+}
+
+enum LedgerReferenceType {
+  STRIPE_INVOICE
+  STRIPE_PAYMENT_INTENT
+  USAGE_EVENT
+  MANUAL
+}
+
+model LedgerAccount {
+  id       String            @id @default(uuid())
+  appId    String
+  billToId String
+  type     LedgerAccountType
+
+  createdAt DateTime @default(now())
+
+  billingEntity BillingEntity @relation(fields: [billToId], references: [id])
+  entries       LedgerEntry[]
+
+  @@unique([appId, billToId, type])
+}
+
+model LedgerEntry {
+  id              String              @id @default(uuid())
+  appId           String
+  billToId        String
+  ledgerAccountId String
+  timestamp       DateTime            @default(now())
+  type            LedgerEntryType
+  amountMinor     Int
+  currency        String
+  referenceType   LedgerReferenceType
+  referenceId     String?
+  idempotencyKey  String              @unique
+  metadata        Json?
+
+  createdAt DateTime @default(now())
+
+  billingEntity BillingEntity @relation(fields: [billToId], references: [id])
+  ledgerAccount LedgerAccount @relation(fields: [ledgerAccountId], references: [id])
+
+  @@index([billToId, timestamp])
+  @@index([ledgerAccountId, timestamp])
 }
 
 // ─── Stripe Webhooks ────────────────────────────────────────────────────────
