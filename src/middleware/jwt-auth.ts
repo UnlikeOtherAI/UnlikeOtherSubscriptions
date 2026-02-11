@@ -7,6 +7,8 @@ const EXPECTED_AUDIENCE = "billing-service";
 
 const SKIP_AUTH_ROUTES = new Set(["/healthz", "/v1/stripe/webhook"]);
 
+const SKIP_AUTH_PREFIXES = ["/v1/admin/"];
+
 function base64UrlDecode(str: string): Buffer {
   const padded = str.replace(/-/g, "+").replace(/_/g, "/");
   return Buffer.from(padded, "base64");
@@ -136,6 +138,14 @@ export function registerJwtAuth(app: FastifyInstance): void {
     // Also skip by routeOptions path pattern for parameterized routes
     const routePath = request.routeOptions?.url;
     if (routePath && SKIP_AUTH_ROUTES.has(routePath)) {
+      return;
+    }
+
+    // Skip admin routes (secured by separate mechanism)
+    if (SKIP_AUTH_PREFIXES.some((prefix) => request.url.startsWith(prefix))) {
+      return;
+    }
+    if (routePath && SKIP_AUTH_PREFIXES.some((prefix) => routePath.startsWith(prefix))) {
       return;
     }
 
