@@ -57,6 +57,7 @@ model App {
   users            User[]
   secrets          AppSecret[]
   externalTeamRefs ExternalTeamRef[]
+  plans            Plan[]
 }
 
 model Team {
@@ -159,4 +160,46 @@ model JtiUsage {
   expiresAt DateTime
 
   @@index([expiresAt])
+}
+
+// ─── Subscriptions & Products ───────────────────────────────────────────────
+
+enum StripeProductMapKind {
+  BASE
+  SEAT
+  ADDON
+  OVERAGE
+  TOPUP
+}
+
+model Plan {
+  id     String @id @default(uuid())
+  appId  String
+  code   String
+  name   String
+  status String @default("ACTIVE")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  app              App               @relation(fields: [appId], references: [id])
+  stripeProductMaps StripeProductMap[]
+
+  @@unique([appId, code])
+}
+
+model StripeProductMap {
+  id              String             @id @default(uuid())
+  appId           String
+  planId          String?
+  stripeProductId String
+  stripePriceId   String
+  kind            StripeProductMapKind
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plan Plan? @relation(fields: [planId], references: [id])
+
+  @@unique([appId, stripePriceId])
 }
