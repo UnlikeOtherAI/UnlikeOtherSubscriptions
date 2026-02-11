@@ -1,2 +1,35 @@
-// Entry point — server bootstrap will be implemented in the health check task.
-export {};
+import { buildServer } from "./lib/server.js";
+import { disconnectPrisma } from "./lib/prisma.js";
+
+const PORT = parseInt(process.env.PORT ?? "3000", 10);
+const HOST = process.env.HOST ?? "0.0.0.0";
+
+async function main(): Promise<void> {
+  const app = buildServer();
+
+  const shutdown = async (signal: string) => {
+    app.log.info({ signal }, "Received shutdown signal, closing gracefully");
+    try {
+      await app.close();
+      await disconnectPrisma();
+      // pg-boss shutdown will be added when pg-boss is initialised
+      app.log.info("Graceful shutdown complete");
+      process.exit(0);
+    } catch (err) {
+      app.log.error({ err }, "Error during graceful shutdown");
+      process.exit(1);
+    }
+  };
+
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+
+  try {
+    await app.listen({ port: PORT, host: HOST });
+  } catch (err) {
+    app.log.fatal({ err }, "Failed to start server");
+    process.exit(1);
+  }
+}
+
+main();
