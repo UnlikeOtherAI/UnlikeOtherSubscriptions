@@ -7,6 +7,7 @@ import { healthRoutes } from "../routes/health.js";
 import { adminAppRoutes } from "../routes/admin-apps.js";
 import { userRoutes } from "../routes/users.js";
 import { teamRoutes } from "../routes/teams.js";
+import { teamMemberRoutes } from "../routes/team-members.js";
 import { disconnectPrisma } from "./prisma.js";
 import { stopBoss } from "./pg-boss.js";
 
@@ -32,6 +33,7 @@ export function buildServer(): FastifyInstance {
   app.register(adminAppRoutes);
   app.register(userRoutes);
   app.register(teamRoutes);
+  app.register(teamMemberRoutes);
 
   app.addHook("onClose", async () => {
     await stopBoss();
