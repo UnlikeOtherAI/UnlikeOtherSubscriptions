@@ -178,10 +178,12 @@ Every tool integrates via a shared TypeScript SDK and a single event shape:
 | `idempotencyKey` | Yes | Deduplication key (unique per App) |
 | `eventType` | Yes | Versioned namespaced string (e.g. `llm.tokens.v1`, `storage.sample.v1`) |
 | `timestamp` | Yes | Event time (UTC) |
-| `teamId` | Yes | Owning team |
-| `userId` | No | Acting user (for attribution) |
+| `teamId` | Conditional | Owning team. Required unless `userId` is provided, in which case the server resolves `teamId` from the user's Personal Team. |
+| `userId` | No | Acting user (for attribution). If provided without `teamId`, the server resolves `teamId = personalTeam(userId)`. |
 | `payload` | Yes | JSONB — validated against the schema for the event type version |
 | `source` | Yes | Service name and version |
+
+> **Note:** `billToId` is **not** client-provided. The server resolves it from `teamId` at ingestion time (via the Team's `BillingEntity`). It appears on the stored `UsageEvent` record but is never part of the client-facing contract.
 
 ### Event Schema Versioning
 
@@ -198,10 +200,15 @@ The billing service validates each payload against its registered schema version
 A lightweight TypeScript SDK consumed by every tool:
 
 ```ts
+// appId is configured once when creating the client instance:
+// const billingClient = createBillingClient({ appId, secret, baseUrl })
+
 billingClient.reportUsage(events[])
 billingClient.getEntitlements(teamId)
 billingClient.createCheckout(teamId, options)
 ```
+
+> **Note:** `appId` is not passed per-call. It is set once in the SDK client configuration and included automatically in JWTs and API paths.
 
 This prevents each tool from inventing its own integration.
 

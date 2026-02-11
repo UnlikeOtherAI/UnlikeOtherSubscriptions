@@ -5,10 +5,10 @@
 | Layer | Technology |
 |-------|------------|
 | Runtime | Node.js |
-| HTTP Framework | Fastify (or Nest) |
+| HTTP Framework | Fastify |
 | ORM | Prisma |
 | Database | PostgreSQL |
-| Queue | pg-boss (Postgres-backed) or BullMQ (Redis) |
+| Queue | pg-boss (Postgres-backed) |
 | Payments | Stripe |
 | Validation | Zod |
 | Logging | Pino (structured) |
@@ -62,7 +62,7 @@ The service is structured as a single deployable containing four internal compon
 - `ownerUserId` (nullable; set when `kind = PERSONAL`)
 - `defaultCurrency`
 - `stripeCustomerId` (nullable until Stripe customer is created)
-- `billingMode` — `subscription` | `wallet` | `hybrid` | `enterprise`
+- `billingMode` — `SUBSCRIPTION` | `WALLET` | `HYBRID` | `ENTERPRISE_CONTRACT`
 - **V1 constraint:** unique partial index `(ownerUserId) WHERE kind = 'PERSONAL'` — one Personal Team per user
 
 #### BillingEntity
@@ -94,7 +94,7 @@ Team IDs are **global across apps**. Each app maps its own team records to the b
 #### StripeProductMap
 - `appId`, `planId` or `addonId`
 - `stripeProductId`, `stripePriceId`
-- `kind` — `base` | `seat` | `addon` | `overage` | `topup`
+- `kind` — `BASE` | `SEAT` | `ADDON` | `OVERAGE` | `TOPUP`
 
 #### TeamSubscription
 - `teamId`, `stripeSubscriptionId`, `status`
@@ -125,7 +125,7 @@ Team IDs are **global across apps**. Each app maps its own team records to the b
 
 #### Contract
 - `id`, `billToId` (references `BillingEntity.id`; V1: always a Team's billing entity)
-- `status` — `draft` | `active` | `paused` | `ended`
+- `status` — `DRAFT` | `ACTIVE` | `PAUSED` | `ENDED`
 - `bundleId` (primary; may support multiple bundles)
 - `currency`, `billingPeriod` (`monthly` | `quarterly`)
 - `termsDays` (e.g. net 30)
@@ -151,7 +151,7 @@ Internal canonical invoices for export to Xero/QuickBooks or manual billing.
 #### Invoice
 - `id`, `billToId` (references `BillingEntity.id`), `contractId`
 - `periodStart`, `periodEnd`
-- `status` — `draft` | `issued` | `paid` | `void`
+- `status` — `DRAFT` | `ISSUED` | `PAID` | `VOID`
 - `subtotalMinor`, `taxMinor`, `totalMinor`
 - `externalRef` (Xero ID / manual invoice number, nullable)
 - `issuedAt`, `dueAt`
@@ -170,6 +170,7 @@ Internal canonical invoices for export to Xero/QuickBooks or manual billing.
 - `eventType` — versioned namespaced string (`llm.tokens.v1`, `llm.image.v1`, `storage.sample.v1`, `bandwidth.sample.v1`)
 - `timestamp`, `idempotencyKey` (unique per `appId`)
 - `payload` (JSONB)
+- `source` — service name and version (e.g. `my-tool/1.0.0`)
 - Indexes: `(appId, teamId, timestamp)`, `(billToId, timestamp)`, unique `(appId, idempotencyKey)`
 
 `teamId` is always present for per-app enforcement and reporting. `billToId` enables billing rollups (V1: same as the team's billing entity; future: may point to an org-level entity).
@@ -177,23 +178,23 @@ Internal canonical invoices for export to Xero/QuickBooks or manual billing.
 **Payload examples:**
 
 ```json
-// llm.tokens
+// llm.tokens.v1
 { "provider": "openai", "model": "gpt-5", "inputTokens": 1200, "outputTokens": 350, "cachedTokens": 800 }
 
-// llm.image
+// llm.image.v1
 { "provider": "openai", "model": "gpt-image-1", "width": 1024, "height": 1024, "count": 2 }
 
-// storage.sample
+// storage.sample.v1
 { "bytesUsed": 9876543210 }
 
-// bandwidth.sample
+// bandwidth.sample.v1
 { "bytesIn": 123456, "bytesOut": 654321, "bytesOutInternal": 111111 }
 ```
 
 ### Pricing
 
 #### PriceBook
-- `id`, `appId`, `kind` (`cogs` | `customer`), `currency`
+- `id`, `appId`, `kind` (`COGS` | `CUSTOMER`), `currency`
 - `version`, `effectiveFrom`, `effectiveTo`
 
 Two price books exist per App:
@@ -216,7 +217,7 @@ Two price books exist per App:
 ### Billable Line Items (Immutable)
 
 #### BillableLineItem
-- `id`, `appId`, `teamId`, `userId` (optional)
+- `id`, `appId`, `billToId` (references `BillingEntity.id`), `teamId`, `userId` (optional)
 - `usageEventId` (nullable if derived from aggregate)
 - `timestamp`, `priceBookId`, `priceRuleId`
 - `amountMinor`, `currency`
@@ -227,13 +228,13 @@ Two price books exist per App:
 
 #### LedgerAccount
 - `id`, `appId`, `billToId` (references `BillingEntity.id`)
-- `type` — `wallet` | `accounts_receivable` | `revenue` | `cogs` | `tax`
+- `type` — `WALLET` | `ACCOUNTS_RECEIVABLE` | `REVENUE` | `COGS` | `TAX`
 
 #### LedgerEntry
 - `id`, `appId`, `billToId` (references `BillingEntity.id`), `timestamp`
-- `type` — `topup` | `subscription_charge` | `usage_charge` | `refund` | `adjustment` | `invoice_payment` | `cogs_accrual`
+- `type` — `TOPUP` | `SUBSCRIPTION_CHARGE` | `USAGE_CHARGE` | `REFUND` | `ADJUSTMENT` | `INVOICE_PAYMENT` | `COGS_ACCRUAL`
 - `amountMinor` (positive = credit, negative = debit), `currency`
-- `referenceType` — `stripe_invoice` | `stripe_payment_intent` | `usage_event` | `manual`
+- `referenceType` — `STRIPE_INVOICE` | `STRIPE_PAYMENT_INTENT` | `USAGE_EVENT` | `MANUAL`
 - `referenceId`, `metadata` (JSONB)
 - Indexes: `(billToId, timestamp)`, unique idempotency key for financial actions
 
@@ -302,7 +303,7 @@ When `/v2` is introduced alongside `/v1`:
 
 ### Billing Correctness Rule
 
-Every `BillableLineItem` must store `priceBookId`, `priceRuleId`, `computedAmountMinor`, `currency`, and `inputsSnapshot` (JSONB). This makes historical invoices reproducible even when pricing logic evolves.
+Every `BillableLineItem` must store `priceBookId`, `priceRuleId`, `amountMinor`, `currency`, and `inputsSnapshot` (JSONB). This makes historical invoices reproducible even when pricing logic evolves.
 
 ### CI Enforcement (Non-Negotiable)
 
@@ -473,7 +474,7 @@ The Billing service **owns** all Stripe secrets (stored in env / Vault / KMS). T
 2. If a usage event includes `userId` but no `teamId`, billing service resolves `teamId = personalTeam(userId)` (reduces integration errors)
 3. Billing writes `UsageEvent` rows (idempotent on `idempotencyKey`)
 4. Async worker matches events to `PriceRule`, creates `BillableLineItem` rows
-4. Depending on billing mode:
+5. Depending on billing mode:
    - **Wallet:** debit ledger entries created (immediate or daily batch); auto-top-up if balance is low
    - **Subscription:** accumulate billables; create Stripe invoice items or report metered usage at period end
 
@@ -512,7 +513,7 @@ resolveEntitlements(appId, teamId, atTime) -> EntitlementResult
 1. Look up the team's `BillingEntity`
 2. Check for an `ACTIVE` contract on that billing entity
 3. **If active contract exists:** resolve via enterprise path (bundle + overrides), set `billingMode: ENTERPRISE_CONTRACT`
-4. **If no active contract:** resolve via per-app subscription plan, set `billingMode` to `subscription` | `wallet` | `hybrid`
+4. **If no active contract:** resolve via per-app subscription plan, set `billingMode` to `SUBSCRIPTION` | `WALLET` | `HYBRID`
 
 ### Priority Cascade (Highest Wins)
 
@@ -529,7 +530,7 @@ The resolved entitlement per app contains:
 
 - Features enabled (boolean flags)
 - Meter policies per meter: `limitType`, `includedAmount`, `enforcement`, `overageBilling`
-- Billing mode: `ENTERPRISE_CONTRACT` | `subscription` | `wallet` | `hybrid`
+- Billing mode: `ENTERPRISE_CONTRACT` | `SUBSCRIPTION` | `WALLET` | `HYBRID`
 - `billable` flags (for UI labelling; enforcement is always server-side)
 
 ### Enterprise Defaults

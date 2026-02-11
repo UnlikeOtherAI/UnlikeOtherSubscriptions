@@ -43,13 +43,20 @@ See [`docs/brief.md`](docs/brief.md) for the project brief and [`docs/architectu
 Every tool integrates via a shared TypeScript SDK:
 
 ```ts
-import { billingClient } from '@unlikeotherai/billing-sdk';
+import { createBillingClient } from '@unlikeotherai/billing-sdk';
+
+// appId is configured once at client creation — included automatically in JWTs and API paths
+const billingClient = createBillingClient({
+  appId: 'app_myTool',
+  secret: process.env.BILLING_SECRET!,
+  baseUrl: process.env.BILLING_URL!,
+});
 
 // Report usage
 await billingClient.reportUsage([
   {
     idempotencyKey: 'evt_abc123',
-    eventType: 'llm.tokens',
+    eventType: 'llm.tokens.v1',
     timestamp: new Date().toISOString(),
     teamId: 'team_xyz',
     payload: { provider: 'openai', model: 'gpt-5', inputTokens: 1200, outputTokens: 350 },
