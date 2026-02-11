@@ -10,6 +10,13 @@ export class TeamNotFoundError extends Error {
   }
 }
 
+export class NoStripeCustomerError extends Error {
+  constructor(teamId: string) {
+    super(`Team has no Stripe customer: ${teamId}`);
+    this.name = "NoStripeCustomerError";
+  }
+}
+
 export class StripeService {
   /**
    * Lazily creates a Stripe Customer for a Team. If the Team already has a
@@ -86,6 +93,34 @@ export class StripeService {
       });
       throw err;
     }
+  }
+
+  /**
+   * Creates a Stripe Billing Portal session for a Team. The Team must already
+   * have a stripeCustomerId set (returns NoStripeCustomerError otherwise).
+   */
+  async createPortalSession(
+    teamId: string,
+    returnUrl: string,
+  ): Promise<{ url: string }> {
+    const prisma = getPrismaClient();
+
+    const team = await prisma.team.findUnique({ where: { id: teamId } });
+    if (!team) {
+      throw new TeamNotFoundError(teamId);
+    }
+
+    if (!team.stripeCustomerId || team.stripeCustomerId.startsWith(CLAIM_PREFIX)) {
+      throw new NoStripeCustomerError(teamId);
+    }
+
+    const stripe = getStripeClient();
+    const session = await stripe.billingPortal.sessions.create({
+      customer: team.stripeCustomerId,
+      return_url: returnUrl,
+    });
+
+    return { url: session.url };
   }
 
   /**

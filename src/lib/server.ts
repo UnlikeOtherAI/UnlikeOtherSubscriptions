@@ -9,6 +9,7 @@ import { userRoutes } from "../routes/users.js";
 import { teamRoutes } from "../routes/teams.js";
 import { teamMemberRoutes } from "../routes/team-members.js";
 import { checkoutRoutes } from "../routes/checkout.js";
+import { portalRoutes } from "../routes/portal.js";
 import { entitlementRoutes } from "../routes/entitlements.js";
 import { webhookRoutes } from "../routes/webhook.js";
 import { disconnectPrisma } from "./prisma.js";
@@ -38,6 +39,7 @@ export function buildServer(): FastifyInstance {
   app.register(teamRoutes);
   app.register(teamMemberRoutes);
   app.register(checkoutRoutes);
+  app.register(portalRoutes);
   app.register(entitlementRoutes);
   app.register(webhookRoutes);
 
