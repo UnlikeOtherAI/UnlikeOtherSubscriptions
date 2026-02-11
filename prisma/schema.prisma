@@ -129,6 +129,7 @@ model BillingEntity {
   team           Team?          @relation(fields: [teamId], references: [id])
   ledgerAccounts LedgerAccount[]
   ledgerEntries  LedgerEntry[]
+  usageEvents    UsageEvent[]
 }
 
 model ExternalTeamRef {
@@ -355,6 +356,8 @@ model UsageEvent {
   source         String
 
   createdAt DateTime @default(now())
+
+  billingEntity BillingEntity @relation(fields: [billToId], references: [id])
 
   @@unique([appId, idempotencyKey])
   @@index([appId, teamId, timestamp])
