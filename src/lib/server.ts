@@ -5,6 +5,7 @@ import { registerAdminAuth } from "../middleware/admin-auth.js";
 import { registerJwtAuth } from "../middleware/jwt-auth.js";
 import { healthRoutes } from "../routes/health.js";
 import { adminAppRoutes } from "../routes/admin-apps.js";
+import { userRoutes } from "../routes/users.js";
 import { disconnectPrisma } from "./prisma.js";
 import { stopBoss } from "./pg-boss.js";
 
@@ -28,6 +29,7 @@ export function buildServer(): FastifyInstance {
 
   app.register(healthRoutes);
   app.register(adminAppRoutes);
+  app.register(userRoutes);
 
   app.addHook("onClose", async () => {
     await stopBoss();
