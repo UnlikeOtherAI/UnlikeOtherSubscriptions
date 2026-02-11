@@ -340,6 +340,27 @@ model LedgerEntry {
   @@index([ledgerAccountId, timestamp])
 }
 
+// ─── Usage Events (Immutable) ─────────────────────────────────────────────
+
+model UsageEvent {
+  id             String   @id @default(uuid())
+  appId          String
+  teamId         String
+  billToId       String
+  userId         String?
+  eventType      String
+  timestamp      DateTime
+  idempotencyKey String
+  payload        Json
+  source         String
+
+  createdAt DateTime @default(now())
+
+  @@unique([appId, idempotencyKey])
+  @@index([appId, teamId, timestamp])
+  @@index([billToId, timestamp])
+}
+
 // ─── Stripe Webhooks ────────────────────────────────────────────────────────
 
 model StripeWebhookEvent {
