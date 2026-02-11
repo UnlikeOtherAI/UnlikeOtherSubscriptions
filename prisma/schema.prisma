@@ -58,6 +58,7 @@ model App {
   secrets          AppSecret[]
   externalTeamRefs ExternalTeamRef[]
   plans            Plan[]
+  addons           Addon[]
 }
 
 model Team {
@@ -72,10 +73,12 @@ model Team {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  owner         User?             @relation("PersonalTeamOwner", fields: [ownerUserId], references: [id])
+  owner         User?              @relation("PersonalTeamOwner", fields: [ownerUserId], references: [id])
   members       TeamMember[]
   billingEntity BillingEntity?
   externalRefs  ExternalTeamRef[]
+  subscriptions TeamSubscription[]
+  teamAddons    TeamAddon[]
 
   // Unique partial index: one Personal Team per user
   // Prisma doesn't natively support partial unique indexes, so we use raw SQL
@@ -191,10 +194,28 @@ model Plan {
   @@unique([appId, code])
 }
 
+model Addon {
+  id     String @id @default(uuid())
+  appId  String
+  code   String
+  name   String
+  status String @default("ACTIVE")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  app               App                @relation(fields: [appId], references: [id])
+  stripeProductMaps StripeProductMap[]
+  teamAddons        TeamAddon[]
+
+  @@unique([appId, code])
+}
+
 model StripeProductMap {
   id              String             @id @default(uuid())
   appId           String
   planId          String?
+  addonId         String?
   stripeProductId String
   stripePriceId   String
   kind            StripeProductMapKind
@@ -202,7 +223,8 @@ model StripeProductMap {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  plan Plan? @relation(fields: [planId], references: [id])
+  plan  Plan?  @relation(fields: [planId], references: [id])
+  addon Addon? @relation(fields: [addonId], references: [id])
 
   @@unique([appId, stripePriceId])
 }
@@ -231,9 +253,27 @@ model TeamSubscription {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  team Team @relation(fields: [teamId], references: [id])
   plan Plan @relation(fields: [planId], references: [id])
 
   @@index([teamId])
+}
+
+model TeamAddon {
+  id       String @id @default(uuid())
+  teamId   String
+  addonId  String
+  status   String @default("ACTIVE")
+  quantity Int    @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  team  Team  @relation(fields: [teamId], references: [id])
+  addon Addon @relation(fields: [addonId], references: [id])
+
+  @@index([teamId])
+  @@index([addonId])
 }
 
 // ─── Ledger ────────────────────────────────────────────────────────────────
