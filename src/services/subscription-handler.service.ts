@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import { getPrismaClient } from "../lib/prisma.js";
 import { TeamSubscriptionStatus } from "@prisma/client";
-import { LedgerService } from "./ledger.service.js";
+import { LedgerService, DuplicateLedgerEntryError } from "./ledger.service.js";
 import { EntitlementService } from "./entitlement.service.js";
 
 /**
@@ -129,8 +129,10 @@ export class SubscriptionHandlerService {
             sessionId: session.id,
           },
         });
-      } catch {
-        // DuplicateLedgerEntryError is expected on idempotent replays
+      } catch (err: unknown) {
+        if (!(err instanceof DuplicateLedgerEntryError)) {
+          throw err;
+        }
       }
     }
 
@@ -250,8 +252,10 @@ export class SubscriptionHandlerService {
           invoiceId: invoice.id,
         },
       });
-    } catch {
-      // DuplicateLedgerEntryError is expected on idempotent replays
+    } catch (err: unknown) {
+      if (!(err instanceof DuplicateLedgerEntryError)) {
+        throw err;
+      }
     }
   }
 
@@ -315,8 +319,10 @@ export class SubscriptionHandlerService {
           amountDue: invoice.amount_due,
         },
       });
-    } catch {
-      // DuplicateLedgerEntryError is expected on idempotent replays
+    } catch (err: unknown) {
+      if (!(err instanceof DuplicateLedgerEntryError)) {
+        throw err;
+      }
     }
 
     await this.entitlementService.refreshEntitlements(teamSub.teamId);

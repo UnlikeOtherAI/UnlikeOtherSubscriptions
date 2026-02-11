@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Stripe from "stripe";
 import { SubscriptionHandlerService } from "./subscription-handler.service.js";
+import { DuplicateLedgerEntryError } from "./ledger.service.js";
 
 // --- Mocks ---
 
@@ -56,26 +57,21 @@ function setupBillingEntityMock() {
   });
 }
 
-function setupLedgerAccountMock() {
-  mockPrisma.ledgerAccount.findUnique.mockResolvedValue({
-    id: "la-001", appId: APP_ID, billToId: BILLING_ENTITY_ID, type: "REVENUE",
-  });
-}
-
-function setupLedgerEntryMock() {
-  mockPrisma.ledgerEntry.create.mockResolvedValue({
-    id: "le-001", idempotencyKey: "test-key",
-  });
-}
-
 // --- Tests ---
 
 describe("SubscriptionHandlerService — checkout & subscription events", () => {
   let handler: SubscriptionHandlerService;
+  let mockEntitlementService: { refreshEntitlements: ReturnType<typeof vi.fn> };
+  let mockLedgerService: { createEntry: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    handler = new SubscriptionHandlerService();
+    mockEntitlementService = { refreshEntitlements: vi.fn().mockResolvedValue(undefined) };
+    mockLedgerService = { createEntry: vi.fn().mockResolvedValue("le-001") };
+    handler = new SubscriptionHandlerService(
+      mockLedgerService as unknown as import("./ledger.service.js").LedgerService,
+      mockEntitlementService as unknown as import("./entitlement.service.js").EntitlementService,
+    );
   });
 
   describe("handleCheckoutSessionCompleted", () => {
@@ -95,8 +91,6 @@ describe("SubscriptionHandlerService — checkout & subscription events", () => 
         stripeSubscriptionId: SUBSCRIPTION_ID, status: "ACTIVE", planId: PLAN_ID,
       });
       setupBillingEntityMock();
-      setupLedgerAccountMock();
-      setupLedgerEntryMock();
 
       await handler.handleCheckoutSessionCompleted(event);
 
@@ -109,14 +103,14 @@ describe("SubscriptionHandlerService — checkout & subscription events", () => 
         update: expect.objectContaining({ status: "ACTIVE" }),
       });
 
-      expect(mockPrisma.ledgerEntry.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      expect(mockLedgerService.createEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
           appId: APP_ID, billToId: BILLING_ENTITY_ID,
           type: "SUBSCRIPTION_CHARGE", amountMinor: 2999,
           currency: "usd", referenceType: "STRIPE_PAYMENT_INTENT",
           referenceId: "pi_test_123", idempotencyKey: `checkout:${event.id}`,
         }),
-      });
+      );
     });
 
     it("skips non-subscription checkout sessions", async () => {
@@ -146,10 +140,9 @@ describe("SubscriptionHandlerService — checkout & subscription events", () => 
       });
       mockPrisma.teamSubscription.upsert.mockResolvedValue({ id: "ts-001" });
       setupBillingEntityMock();
-      setupLedgerAccountMock();
-      mockPrisma.ledgerEntry.create.mockRejectedValue({
-        code: "P2002", meta: { target: ["idempotencyKey"] },
-      });
+      mockLedgerService.createEntry.mockRejectedValue(
+        new DuplicateLedgerEntryError("checkout:test"),
+      );
       await handler.handleCheckoutSessionCompleted(event);
       expect(mockPrisma.teamSubscription.upsert).toHaveBeenCalled();
     });
@@ -170,8 +163,6 @@ describe("SubscriptionHandlerService — checkout & subscription events", () => 
       });
       mockPrisma.teamSubscription.upsert.mockResolvedValue({ id: "ts-002" });
       setupBillingEntityMock();
-      setupLedgerAccountMock();
-      setupLedgerEntryMock();
 
       await handler.handleCheckoutSessionCompleted(event);
 
@@ -183,6 +174,37 @@ describe("SubscriptionHandlerService — checkout & subscription events", () => 
             currentPeriodEnd: new Date(periodEnd * 1000),
           }),
         }),
+      );
+    });
+
+    it("calls refreshEntitlements with teamId after checkout completes", async () => {
+      const event = makeStripeEvent("checkout.session.completed", {
+        id: "cs_entitle", mode: "subscription",
+        subscription: SUBSCRIPTION_ID,
+        metadata: { teamId: TEAM_ID, appId: APP_ID, planId: PLAN_ID },
+        amount_total: 2999, currency: "usd", payment_intent: "pi_ent",
+      });
+      mockPrisma.teamSubscription.upsert.mockResolvedValue({ id: "ts-001" });
+      setupBillingEntityMock();
+
+      await handler.handleCheckoutSessionCompleted(event);
+
+      expect(mockEntitlementService.refreshEntitlements).toHaveBeenCalledWith(TEAM_ID);
+    });
+
+    it("propagates non-duplicate ledger errors instead of swallowing them", async () => {
+      const event = makeStripeEvent("checkout.session.completed", {
+        id: "cs_err", mode: "subscription",
+        subscription: SUBSCRIPTION_ID,
+        metadata: { teamId: TEAM_ID, appId: APP_ID, planId: PLAN_ID },
+        amount_total: 2999, currency: "usd", payment_intent: "pi_err",
+      });
+      mockPrisma.teamSubscription.upsert.mockResolvedValue({ id: "ts-001" });
+      setupBillingEntityMock();
+      mockLedgerService.createEntry.mockRejectedValue(new Error("DB connection lost"));
+
+      await expect(handler.handleCheckoutSessionCompleted(event)).rejects.toThrow(
+        "DB connection lost",
       );
     });
   });
@@ -244,6 +266,23 @@ describe("SubscriptionHandlerService — checkout & subscription events", () => 
         }),
       );
     });
+
+    it("calls refreshEntitlements with teamId after subscription update", async () => {
+      const event = makeStripeEvent("customer.subscription.updated", {
+        id: SUBSCRIPTION_ID, status: "active",
+        current_period_start: Math.floor(Date.now() / 1000),
+        current_period_end: Math.floor(Date.now() / 1000) + 86400,
+        items: { data: [{ quantity: 2 }] },
+      });
+      mockPrisma.teamSubscription.findUnique.mockResolvedValue({
+        id: "ts-001", teamId: TEAM_ID, stripeSubscriptionId: SUBSCRIPTION_ID,
+      });
+      mockPrisma.teamSubscription.update.mockResolvedValue({});
+
+      await handler.handleSubscriptionUpdated(event);
+
+      expect(mockEntitlementService.refreshEntitlements).toHaveBeenCalledWith(TEAM_ID);
+    });
   });
 
   describe("handleSubscriptionDeleted", () => {
@@ -277,6 +316,23 @@ describe("SubscriptionHandlerService — checkout & subscription events", () => 
       mockPrisma.teamSubscription.findUnique.mockResolvedValue(null);
       await handler.handleSubscriptionDeleted(event);
       expect(mockPrisma.teamSubscription.update).not.toHaveBeenCalled();
+    });
+
+    it("calls refreshEntitlements with teamId after subscription deleted", async () => {
+      const event = makeStripeEvent("customer.subscription.deleted", {
+        id: SUBSCRIPTION_ID, status: "canceled",
+        current_period_start: Math.floor(Date.now() / 1000),
+        current_period_end: Math.floor(Date.now() / 1000),
+        items: { data: [] },
+      });
+      mockPrisma.teamSubscription.findUnique.mockResolvedValue({
+        id: "ts-001", teamId: TEAM_ID, stripeSubscriptionId: SUBSCRIPTION_ID,
+      });
+      mockPrisma.teamSubscription.update.mockResolvedValue({ status: "CANCELED" });
+
+      await handler.handleSubscriptionDeleted(event);
+
+      expect(mockEntitlementService.refreshEntitlements).toHaveBeenCalledWith(TEAM_ID);
     });
   });
 });
