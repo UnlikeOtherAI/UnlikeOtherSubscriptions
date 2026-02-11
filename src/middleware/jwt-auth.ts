@@ -1,13 +1,12 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getPrismaClient } from "../lib/prisma.js";
+import { decryptSecret } from "../lib/crypto.js";
 import type { JwtClaims } from "../types/fastify.js";
 
 const EXPECTED_AUDIENCE = "billing-service";
 
 const SKIP_AUTH_ROUTES = new Set(["/healthz", "/v1/stripe/webhook"]);
-
-const SKIP_AUTH_PREFIXES = ["/v1/admin/"];
 
 function base64UrlDecode(str: string): Buffer {
   const padded = str.replace(/-/g, "+").replace(/_/g, "/");
@@ -141,11 +140,8 @@ export function registerJwtAuth(app: FastifyInstance): void {
       return;
     }
 
-    // Skip admin routes (secured by separate mechanism)
-    if (SKIP_AUTH_PREFIXES.some((prefix) => request.url.startsWith(prefix))) {
-      return;
-    }
-    if (routePath && SKIP_AUTH_PREFIXES.some((prefix) => routePath.startsWith(prefix))) {
+    // Skip JWT auth for admin routes — they are secured by the admin API key middleware
+    if (request.url.startsWith("/v1/admin/") || (routePath && routePath.startsWith("/v1/admin/"))) {
       return;
     }
 
@@ -198,9 +194,16 @@ export function registerJwtAuth(app: FastifyInstance): void {
       return sendUnauthorized(reply, "Key has been revoked", requestId);
     }
 
-    // Verify HMAC signature using the stored secret hash
-    // Note: secretHash here is the actual HMAC signing key (stored as-is for HMAC)
-    if (!verifyHmacSignature(parts.headerB64, parts.payloadB64, parts.signatureB64, appSecret.secretHash)) {
+    // Decrypt the stored secret to use for HMAC verification
+    let signingKey: string;
+    try {
+      signingKey = decryptSecret(appSecret.secretHash);
+    } catch {
+      return sendUnauthorized(reply, "Failed to verify key", requestId);
+    }
+
+    // Verify HMAC signature using the decrypted secret
+    if (!verifyHmacSignature(parts.headerB64, parts.payloadB64, parts.signatureB64, signingKey)) {
       return sendUnauthorized(reply, "Invalid signature", requestId);
     }
 

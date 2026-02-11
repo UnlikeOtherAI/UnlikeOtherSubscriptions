@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import Fastify, { FastifyInstance } from "fastify";
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
 import { registerCorrelationId } from "../middleware/correlation-id.js";
 import { registerErrorHandler } from "../middleware/error-handler.js";
+import { registerAdminAuth } from "../middleware/admin-auth.js";
 import { registerJwtAuth } from "../middleware/jwt-auth.js";
 import { adminAppRoutes } from "./admin-apps.js";
+import { encryptSecret, decryptSecret } from "../lib/crypto.js";
+
+const TEST_ADMIN_API_KEY = "test-admin-api-key-for-testing";
+const TEST_ENCRYPTION_KEY = randomBytes(32).toString("hex");
 
 // In-memory stores for mocked Prisma
 let apps: Map<string, { id: string; name: string; status: string; createdAt: Date; updatedAt: Date }>;
@@ -134,6 +139,7 @@ function buildTestApp(): FastifyInstance {
   const app = Fastify({ logger: false, requestIdHeader: false });
   registerCorrelationId(app);
   registerErrorHandler(app);
+  registerAdminAuth(app);
   registerJwtAuth(app);
   app.register(adminAppRoutes);
 
@@ -145,11 +151,17 @@ function buildTestApp(): FastifyInstance {
   return app;
 }
 
+function adminHeaders(): Record<string, string> {
+  return { "x-admin-api-key": TEST_ADMIN_API_KEY };
+}
+
 describe("Admin App endpoints", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    process.env.ADMIN_API_KEY = TEST_ADMIN_API_KEY;
+    process.env.SECRETS_ENCRYPTION_KEY = TEST_ENCRYPTION_KEY;
     setupInMemoryMocks();
     app = buildTestApp();
     await app.ready();
@@ -157,6 +169,8 @@ describe("Admin App endpoints", () => {
 
   afterEach(async () => {
     await app.close();
+    delete process.env.ADMIN_API_KEY;
+    delete process.env.SECRETS_ENCRYPTION_KEY;
   });
 
   describe("POST /v1/admin/apps", () => {
@@ -165,6 +179,7 @@ describe("Admin App endpoints", () => {
         method: "POST",
         url: "/v1/admin/apps",
         payload: { name: "My Test App" },
+        headers: adminHeaders(),
       });
 
       expect(response.statusCode).toBe(201);
@@ -180,6 +195,7 @@ describe("Admin App endpoints", () => {
         method: "POST",
         url: "/v1/admin/apps",
         payload: {},
+        headers: adminHeaders(),
       });
 
       expect(response.statusCode).toBe(400);
@@ -190,19 +206,33 @@ describe("Admin App endpoints", () => {
         method: "POST",
         url: "/v1/admin/apps",
         payload: { name: "" },
+        headers: adminHeaders(),
       });
 
       expect(response.statusCode).toBe(400);
     });
 
-    it("does not require JWT auth (admin route)", async () => {
+    it("returns 403 without admin API key", async () => {
       const response = await app.inject({
         method: "POST",
         url: "/v1/admin/apps",
-        payload: { name: "No Auth Needed" },
+        payload: { name: "No Auth" },
       });
 
-      expect(response.statusCode).toBe(201);
+      expect(response.statusCode).toBe(403);
+      expect(response.json().message).toBe("Missing admin API key");
+    });
+
+    it("returns 403 with invalid admin API key", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/admin/apps",
+        payload: { name: "Bad Auth" },
+        headers: { "x-admin-api-key": "wrong-key" },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json().message).toBe("Invalid admin API key");
     });
   });
 
@@ -213,12 +243,14 @@ describe("Admin App endpoints", () => {
         method: "POST",
         url: "/v1/admin/apps",
         payload: { name: "Secret Test App" },
+        headers: adminHeaders(),
       });
       const appId = createRes.json().id;
 
       const response = await app.inject({
         method: "POST",
         url: `/v1/admin/apps/${appId}/secrets`,
+        headers: adminHeaders(),
       });
 
       expect(response.statusCode).toBe(201);
@@ -231,11 +263,42 @@ describe("Admin App endpoints", () => {
       expect(body.secret.length).toBeGreaterThan(0);
     });
 
+    it("stores secret encrypted (not plaintext) in the database", async () => {
+      const createRes = await app.inject({
+        method: "POST",
+        url: "/v1/admin/apps",
+        payload: { name: "Encryption Test App" },
+        headers: adminHeaders(),
+      });
+      const appId = createRes.json().id;
+
+      const secretRes = await app.inject({
+        method: "POST",
+        url: `/v1/admin/apps/${appId}/secrets`,
+        headers: adminHeaders(),
+      });
+      const { kid, secret: plaintextSecret } = secretRes.json();
+
+      // Verify the stored secretHash is NOT the plaintext secret
+      const storedSecret = secrets.get(kid);
+      expect(storedSecret).toBeDefined();
+      expect(storedSecret!.secretHash).not.toBe(plaintextSecret);
+
+      // Verify it's in the encrypted format (iv:authTag:ciphertext)
+      const parts = storedSecret!.secretHash.split(":");
+      expect(parts.length).toBe(3);
+
+      // Verify decrypting it yields the original plaintext
+      const decrypted = decryptSecret(storedSecret!.secretHash);
+      expect(decrypted).toBe(plaintextSecret);
+    });
+
     it("returns 404 for nonexistent App", async () => {
       const fakeAppId = uuidv4();
       const response = await app.inject({
         method: "POST",
         url: `/v1/admin/apps/${fakeAppId}/secrets`,
+        headers: adminHeaders(),
       });
 
       expect(response.statusCode).toBe(404);
@@ -249,16 +312,19 @@ describe("Admin App endpoints", () => {
         method: "POST",
         url: "/v1/admin/apps",
         payload: { name: "Multi Secret App" },
+        headers: adminHeaders(),
       });
       const appId = createRes.json().id;
 
       const secret1Res = await app.inject({
         method: "POST",
         url: `/v1/admin/apps/${appId}/secrets`,
+        headers: adminHeaders(),
       });
       const secret2Res = await app.inject({
         method: "POST",
         url: `/v1/admin/apps/${appId}/secrets`,
+        headers: adminHeaders(),
       });
 
       expect(secret1Res.statusCode).toBe(201);
@@ -277,12 +343,14 @@ describe("Admin App endpoints", () => {
         method: "POST",
         url: "/v1/admin/apps",
         payload: { name: "JWT Test App" },
+        headers: adminHeaders(),
       });
       const appId = createRes.json().id;
 
       const secretRes = await app.inject({
         method: "POST",
         url: `/v1/admin/apps/${appId}/secrets`,
+        headers: adminHeaders(),
       });
       const { kid, secret } = secretRes.json();
 
@@ -306,16 +374,19 @@ describe("Admin App endpoints", () => {
         method: "POST",
         url: "/v1/admin/apps",
         payload: { name: "Rotation App" },
+        headers: adminHeaders(),
       });
       const appId = createRes.json().id;
 
       const s1Res = await app.inject({
         method: "POST",
         url: `/v1/admin/apps/${appId}/secrets`,
+        headers: adminHeaders(),
       });
       const s2Res = await app.inject({
         method: "POST",
         url: `/v1/admin/apps/${appId}/secrets`,
+        headers: adminHeaders(),
       });
 
       const s1 = s1Res.json();
@@ -349,18 +420,21 @@ describe("Admin App endpoints", () => {
         method: "POST",
         url: "/v1/admin/apps",
         payload: { name: "Revoke Test App" },
+        headers: adminHeaders(),
       });
       const appId = createRes.json().id;
 
       const secretRes = await app.inject({
         method: "POST",
         url: `/v1/admin/apps/${appId}/secrets`,
+        headers: adminHeaders(),
       });
       const { kid } = secretRes.json();
 
       const revokeRes = await app.inject({
         method: "DELETE",
         url: `/v1/admin/apps/${appId}/secrets/${kid}`,
+        headers: adminHeaders(),
       });
 
       expect(revokeRes.statusCode).toBe(200);
@@ -373,6 +447,7 @@ describe("Admin App endpoints", () => {
       const response = await app.inject({
         method: "DELETE",
         url: `/v1/admin/apps/${fakeAppId}/secrets/kid_nonexistent`,
+        headers: adminHeaders(),
       });
 
       expect(response.statusCode).toBe(404);
@@ -383,12 +458,14 @@ describe("Admin App endpoints", () => {
         method: "POST",
         url: "/v1/admin/apps",
         payload: { name: "No Kid App" },
+        headers: adminHeaders(),
       });
       const appId = createRes.json().id;
 
       const response = await app.inject({
         method: "DELETE",
         url: `/v1/admin/apps/${appId}/secrets/kid_doesnotexist`,
+        headers: adminHeaders(),
       });
 
       expect(response.statusCode).toBe(404);
@@ -400,12 +477,14 @@ describe("Admin App endpoints", () => {
         method: "POST",
         url: "/v1/admin/apps",
         payload: { name: "Revoked Auth Test" },
+        headers: adminHeaders(),
       });
       const appId = createRes.json().id;
 
       const secretRes = await app.inject({
         method: "POST",
         url: `/v1/admin/apps/${appId}/secrets`,
+        headers: adminHeaders(),
       });
       const { kid, secret } = secretRes.json();
 
@@ -422,6 +501,7 @@ describe("Admin App endpoints", () => {
       await app.inject({
         method: "DELETE",
         url: `/v1/admin/apps/${appId}/secrets/${kid}`,
+        headers: adminHeaders(),
       });
 
       // Now a JWT signed with the revoked secret should fail
@@ -441,12 +521,14 @@ describe("Admin App endpoints", () => {
         method: "POST",
         url: "/v1/admin/apps",
         payload: { name: "Idempotent Revoke" },
+        headers: adminHeaders(),
       });
       const appId = createRes.json().id;
 
       const secretRes = await app.inject({
         method: "POST",
         url: `/v1/admin/apps/${appId}/secrets`,
+        headers: adminHeaders(),
       });
       const { kid } = secretRes.json();
 
@@ -454,14 +536,25 @@ describe("Admin App endpoints", () => {
       const first = await app.inject({
         method: "DELETE",
         url: `/v1/admin/apps/${appId}/secrets/${kid}`,
+        headers: adminHeaders(),
       });
       expect(first.statusCode).toBe(200);
 
       const second = await app.inject({
         method: "DELETE",
         url: `/v1/admin/apps/${appId}/secrets/${kid}`,
+        headers: adminHeaders(),
       });
       expect(second.statusCode).toBe(200);
+    });
+
+    it("returns 403 without admin API key for revoke", async () => {
+      const response = await app.inject({
+        method: "DELETE",
+        url: "/v1/admin/apps/some-app-id/secrets/some-kid",
+      });
+
+      expect(response.statusCode).toBe(403);
     });
   });
 });

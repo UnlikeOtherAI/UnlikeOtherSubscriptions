@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
 import { getPrismaClient } from "../lib/prisma.js";
+import { encryptSecret } from "../lib/crypto.js";
 
 export interface CreateAppResult {
   id: string;
@@ -40,13 +41,15 @@ export class AppService {
     const kid = `kid_${uuidv4().replace(/-/g, "")}`;
     const secret = randomBytes(32).toString("hex");
 
-    // Store the raw secret in secretHash — the JWT auth middleware uses it
-    // directly as the HMAC signing key for signature verification.
+    // Encrypt the secret before storing — the JWT auth middleware decrypts it
+    // at verification time to use as the HMAC signing key.
+    const encrypted = encryptSecret(secret);
+
     await prisma.appSecret.create({
       data: {
         appId,
         kid,
-        secretHash: secret,
+        secretHash: encrypted,
       },
     });
 

@@ -26,12 +26,16 @@ describe("Server", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    process.env.ADMIN_API_KEY = "test-admin-key";
+    process.env.SECRETS_ENCRYPTION_KEY = "a".repeat(64);
     app = buildServer();
     await app.ready();
   });
 
   afterEach(async () => {
     await app.close();
+    delete process.env.ADMIN_API_KEY;
+    delete process.env.SECRETS_ENCRYPTION_KEY;
   });
 
   it("builds and starts successfully", () => {

@@ -1,16 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import Fastify, { FastifyInstance } from "fastify";
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
 import { registerCorrelationId } from "./correlation-id.js";
 import { registerErrorHandler } from "./error-handler.js";
+import { registerAdminAuth } from "./admin-auth.js";
 import { registerJwtAuth } from "./jwt-auth.js";
+import { encryptSecret } from "../lib/crypto.js";
 
 // Mock data
 const TEST_APP_ID = "app-123";
 const TEST_KID = "kid-abc";
 const TEST_SECRET = "test-hmac-secret-key-that-is-long-enough";
 const TEST_REVOKED_KID = "kid-revoked";
+const TEST_ENCRYPTION_KEY = randomBytes(32).toString("hex");
+const TEST_ADMIN_API_KEY = "test-admin-api-key";
 
 // Track created JTIs for replay testing
 const usedJtis = new Map<string, Date>();
@@ -106,6 +110,7 @@ function buildTestApp(): FastifyInstance {
 
   registerCorrelationId(app);
   registerErrorHandler(app);
+  registerAdminAuth(app);
   registerJwtAuth(app);
 
   // A protected test route
@@ -125,17 +130,25 @@ function buildTestApp(): FastifyInstance {
     return { received: true };
   });
 
+  // Admin route - should bypass JWT auth (secured by admin API key)
+  app.get("/v1/admin/test", async () => {
+    return { admin: true };
+  });
+
   return app;
 }
 
 function setupDefaultMocks(): void {
+  // Encrypt the test secret so the mock returns encrypted data
+  const encryptedSecret = encryptSecret(TEST_SECRET);
+
   mockFindUnique.mockImplementation(({ where }: { where: { kid: string } }) => {
     if (where.kid === TEST_KID) {
       return Promise.resolve({
         id: "secret-1",
         appId: TEST_APP_ID,
         kid: TEST_KID,
-        secretHash: TEST_SECRET,
+        secretHash: encryptedSecret,
         status: "ACTIVE",
         createdAt: new Date(),
         revokedAt: null,
@@ -146,7 +159,7 @@ function setupDefaultMocks(): void {
         id: "secret-2",
         appId: TEST_APP_ID,
         kid: TEST_REVOKED_KID,
-        secretHash: TEST_SECRET,
+        secretHash: encryptedSecret,
         status: "REVOKED",
         createdAt: new Date(),
         revokedAt: new Date(),
@@ -172,6 +185,8 @@ describe("JWT Auth middleware", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     usedJtis.clear();
+    process.env.SECRETS_ENCRYPTION_KEY = TEST_ENCRYPTION_KEY;
+    process.env.ADMIN_API_KEY = TEST_ADMIN_API_KEY;
     setupDefaultMocks();
     app = buildTestApp();
     await app.ready();
@@ -179,6 +194,8 @@ describe("JWT Auth middleware", () => {
 
   afterEach(async () => {
     await app.close();
+    delete process.env.SECRETS_ENCRYPTION_KEY;
+    delete process.env.ADMIN_API_KEY;
   });
 
   it("allows valid JWT and attaches claims to request", async () => {
@@ -431,6 +448,18 @@ describe("JWT Auth middleware", () => {
     expect(body.received).toBe(true);
   });
 
+  it("bypasses JWT check for /v1/admin/ routes (secured by admin API key)", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/admin/test",
+      headers: { "x-admin-api-key": TEST_ADMIN_API_KEY },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.admin).toBe(true);
+  });
+
   it("includes requestId in 401 error responses", async () => {
     const customId = "custom-req-id-401";
     const response = await app.inject({
@@ -446,11 +475,12 @@ describe("JWT Auth middleware", () => {
 
   it("returns 401 when appId does not match key's appId", async () => {
     // Create a JWT with a different appId than what the key belongs to
+    const encryptedSecret = encryptSecret(TEST_SECRET);
     mockFindUnique.mockResolvedValueOnce({
       id: "secret-other",
       appId: "other-app-id",
       kid: TEST_KID,
-      secretHash: TEST_SECRET,
+      secretHash: encryptedSecret,
       status: "ACTIVE",
       createdAt: new Date(),
       revokedAt: null,
