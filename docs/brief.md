@@ -42,6 +42,25 @@ Billing is always at the **Team** level. Usage events may optionally include a `
 
 **Future-proofing:** all "who pays" references use `billToId` (not `teamId`) on `Contract`, `Invoice`, and `LedgerEntry`. When Orgs arrive, a new `BillingEntity(type=ORG)` is created and `billToId` points to it — no schema rewrite needed. Usage always stays at Team level for enforcement and per-team reporting; org-level views are derived by summing.
 
+### V1 Rule — Personal Teams (Single-User Default)
+
+All billing and entitlements are **Team-scoped**. There is no "user-only billing entity". Every user must belong to at least one Team.
+
+On **user signup/creation**, the system **automatically creates a Personal Team** for that user:
+
+- `Team.kind = PERSONAL`
+- The user is added as `OWNER`
+- This Personal Team is the default selected workspace in the UI
+- Individual subscriptions are simply **subscriptions on the Personal Team** (seats = 1)
+
+Enforcement is **server-side** (not just a frontend concern):
+
+- **One Personal Team per user** — enforced by DB constraint: unique `(ownerUserId) WHERE kind = 'PERSONAL'`
+- Any request requiring billing context **must** include `teamId` — the UI may hide this by auto-selecting the Personal Team, but the backend must guarantee it exists
+- When ingesting usage events, if a tool provides `userId` but no `teamId`, the billing service **resolves** `teamId = personalTeam(userId)` rather than rejecting (reduces integration errors)
+
+Personal Teams can later be upgraded to enterprise contracts or the user can create a separate Team and switch. Default name: `"Personal"` or `"<FirstName>'s workspace"`.
+
 ### Money Model — Ledger First
 
 All financial state is derived from an **append-only ledger**. Entries are never updated or deleted; corrections are made via reversal or adjustment entries. This supports prepaid credits, postpaid invoicing, refunds, disputes, and full auditability.

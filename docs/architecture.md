@@ -58,9 +58,12 @@ The service is structured as a single deployable containing four internal compon
 
 #### Team
 - `id`, `name`
+- `kind` — `PERSONAL` | `STANDARD` | `ENTERPRISE`
+- `ownerUserId` (nullable; set when `kind = PERSONAL`)
 - `defaultCurrency`
 - `stripeCustomerId` (nullable until Stripe customer is created)
 - `billingMode` — `subscription` | `wallet` | `hybrid` | `enterprise`
+- **V1 constraint:** unique partial index `(ownerUserId) WHERE kind = 'PERSONAL'` — one Personal Team per user
 
 #### BillingEntity
 - `id`
@@ -246,6 +249,7 @@ All endpoints require `Authorization: Bearer <jwt>` except the Stripe webhook.
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `POST` | `/v1/apps/:appId/users` | Create or ensure a User exists; **auto-creates Personal Team** if none exists (idempotent) |
 | `POST` | `/v1/apps/:appId/teams` | Create or ensure a Team exists (idempotent) |
 | `POST` | `/v1/apps/:appId/teams/:teamId/users` | Ensure user + membership exists; updates seat count |
 
@@ -360,11 +364,19 @@ The Billing service **owns** all Stripe secrets (stored in env / Vault / KMS). T
 
 ## Core Workflows
 
-### A — Team Creation + Entitlements
+### A — User Signup + Personal Team Provisioning
+
+1. Tool creates User in its own DB
+2. Tool calls `POST /v1/apps/:appId/users` on Billing service
+3. Billing creates User record + **auto-creates a Personal Team** (`kind=PERSONAL`, user as `OWNER`, `BillingEntity` created)
+4. Tool calls `GET /entitlements` with the Personal Team's `teamId` to determine feature access
+5. Individual subscriptions are subscriptions on the Personal Team (seats = 1)
+
+### A2 — Standard Team Creation
 
 1. Tool creates Team in its own DB
 2. Tool calls `POST /teams` on Billing service
-3. Billing creates Team record (and optionally a Stripe Customer)
+3. Billing creates Team record (`kind=STANDARD`) + `BillingEntity` (and optionally a Stripe Customer)
 4. Tool calls `GET /entitlements` to determine feature access
 
 ### B — Subscription Checkout
@@ -379,8 +391,9 @@ The Billing service **owns** all Stripe secrets (stored in env / Vault / KMS). T
 ### C — Usage Ingestion to Billing
 
 1. Tool batches and posts usage events periodically
-2. Billing writes `UsageEvent` rows (idempotent on `idempotencyKey`)
-3. Async worker matches events to `PriceRule`, creates `BillableLineItem` rows
+2. If a usage event includes `userId` but no `teamId`, billing service resolves `teamId = personalTeam(userId)` (reduces integration errors)
+3. Billing writes `UsageEvent` rows (idempotent on `idempotencyKey`)
+4. Async worker matches events to `PriceRule`, creates `BillableLineItem` rows
 4. Depending on billing mode:
    - **Wallet:** debit ledger entries created (immediate or daily batch); auto-top-up if balance is low
    - **Subscription:** accumulate billables; create Stripe invoice items or report metered usage at period end
