@@ -167,7 +167,7 @@ Internal canonical invoices for export to Xero/QuickBooks or manual billing.
 
 #### UsageEvent
 - `id` (UUID), `appId`, `teamId`, `billToId` (references `BillingEntity.id`), `userId` (optional)
-- `eventType` — namespaced string (`llm.tokens`, `llm.image`, `storage.sample`, `bandwidth.sample`)
+- `eventType` — versioned namespaced string (`llm.tokens.v1`, `llm.image.v1`, `storage.sample.v1`, `bandwidth.sample.v1`)
 - `timestamp`, `idempotencyKey` (unique per `appId`)
 - `payload` (JSONB)
 - Indexes: `(appId, teamId, timestamp)`, `(billToId, timestamp)`, unique `(appId, idempotencyKey)`
@@ -238,6 +238,80 @@ Two price books exist per App:
 - Indexes: `(billToId, timestamp)`, unique idempotency key for financial actions
 
 Ledger entries are **only** created by: Stripe webhook handlers, billing runs, or audited admin actions.
+
+---
+
+## API Stability & Versioning
+
+### Versioning Scheme
+
+Major versions are in the URL path: `/v1/...`, `/v2/...`. No silent breaking changes are permitted within a major version. Minor and patch changes are additive only.
+
+### Backwards-Compatible Changes (Allowed in v1)
+
+- Add new endpoints
+- Add optional request fields (with defaults)
+- Add optional response fields
+- Add new enum values
+- Loosen validation
+- Add new event types / schema versions
+
+### Breaking Changes (Require v2)
+
+- Remove or rename fields
+- Make an optional field required
+- Change field type, units, or meaning
+- Change default behaviour that affects billing/entitlements
+- Narrow validation
+
+### Event Schema Versioning
+
+Usage event payloads are versioned via `eventType`:
+
+- `llm.tokens.v1`, `llm.image.v1`, `storage.sample.v1`, `bandwidth.sample.v1`
+- Future: `llm.tokens.v2` (new schema)
+
+The billing service validates payloads against registered schemas. The pricing engine prices multiple schema versions in parallel during migration windows.
+
+### Schema Discovery Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/schemas/usage-events` | List all registered event type schemas |
+| `GET` | `/v1/schemas/usage-events/:eventType` | Returns JSON Schema for a specific event type |
+
+### Capabilities Endpoint
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/meta/capabilities` | Supported event types + versions, meters, max batch sizes, limits |
+
+### Deprecation Signals
+
+When `/v2` is introduced alongside `/v1`:
+
+- HTTP response headers: `Deprecation: true`, `Sunset: <date>`
+- Optional `meta.warnings[]` field in response body
+- Migration guide + SDK support for both versions
+- End-of-life window: 12-24 months for external clients
+
+### JWT Auth Versioning
+
+- JWT claims are **forward-compatible** within v1: never require new claims, always allow unknown claims
+- `kid` enables safe key rotation — multiple active secrets per app during rotation windows
+
+### Billing Correctness Rule
+
+Every `BillableLineItem` must store `priceBookId`, `priceRuleId`, `computedAmountMinor`, `currency`, and `inputsSnapshot` (JSONB). This makes historical invoices reproducible even when pricing logic evolves.
+
+### CI Enforcement (Non-Negotiable)
+
+- **OpenAPI spec per version** stored in repo: `openapi/v1.yaml`
+- CI checks on every PR:
+  - "No breaking changes" diff against previous release (using openapi-diff or equivalent)
+  - Schema validation for usage event JSON Schemas (no breaking changes)
+- **Contract tests:** golden fixtures for key endpoints and webhook handlers
+- If CI detects a breaking change without `/v2`, **the build fails**
 
 ---
 
@@ -341,6 +415,11 @@ Each App holds a shared HMAC secret with the Billing service. Requests are authe
 - TLS required
 - Short `exp` window
 - Store `jti` values for the `exp` duration (Redis or Postgres) to reject duplicates on sensitive endpoints
+
+### Forward Compatibility
+
+- JWT claims are forward-compatible within v1: never require new claims, always allow unknown claims
+- `kid` enables safe key rotation — multiple active secrets per app are supported during rotation windows
 
 ---
 

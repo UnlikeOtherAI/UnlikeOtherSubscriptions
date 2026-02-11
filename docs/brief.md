@@ -130,6 +130,45 @@ The service tracks four categories of usage via a provider/model-agnostic meter 
 | **LLM Tokens** | Counter | Tokens | `inputTokens`, `outputTokens`, `cachedTokens`, provider, model |
 | **LLM Images** | Counter | Images | `width`, `height`, `count`, provider, model |
 
+## API Stability & Versioning Policy
+
+This service is treated as a **public API with a compatibility contract**, even for internal consumers. Breaking existing clients is never acceptable within a major version.
+
+### Versioning
+
+- **Major versions in the URL:** `/v1/...`, `/v2/...`
+- Minor/patch changes are **additive only** — no behaviour changes that break clients
+- If an existing client can't keep working without code changes, it requires a **new major version**
+
+### Backwards-Compatible Changes (Allowed in v1)
+
+- Add new endpoints
+- Add **optional** request fields (with defaults)
+- Add **optional** response fields
+- Add new enum values (clients must treat enums as open-ended)
+- Loosen validation (accept more inputs)
+- Add new event types
+
+### Breaking Changes (Not Allowed in v1)
+
+- Remove or rename fields
+- Make an optional field required
+- Change field type, units, or meaning
+- Change default behaviour that affects billing/entitlements for existing clients
+- Narrow validation (reject inputs that used to pass)
+
+### Client Rule
+
+**Tolerant reader** — all clients must ignore unknown fields and unknown enum values.
+
+### Deprecation Policy
+
+When a breaking change is required: ship `/v2` alongside `/v1` (both run concurrently), announce an end-of-life date for `/v1` (12-24 months for external clients), emit `Deprecation` and `Sunset` HTTP headers, and provide a migration guide with SDK support for both versions.
+
+### SDK Versioning
+
+The official TypeScript SDK is pinned to the major API version: `@unlikeotherai/billing-sdk@1.x` talks to `/v1`.
+
 ## Canonical Event Contract
 
 Every tool integrates via a shared TypeScript SDK and a single event shape:
@@ -137,12 +176,22 @@ Every tool integrates via a shared TypeScript SDK and a single event shape:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `idempotencyKey` | Yes | Deduplication key (unique per App) |
-| `eventType` | Yes | Namespaced string (e.g. `llm.tokens`, `storage.sample`) |
+| `eventType` | Yes | Versioned namespaced string (e.g. `llm.tokens.v1`, `storage.sample.v1`) |
 | `timestamp` | Yes | Event time (UTC) |
 | `teamId` | Yes | Owning team |
 | `userId` | No | Acting user (for attribution) |
-| `payload` | Yes | JSONB — meter-specific data |
+| `payload` | Yes | JSONB — validated against the schema for the event type version |
 | `source` | Yes | Service name and version |
+
+### Event Schema Versioning
+
+Usage event payloads are JSONB and will evolve. Versions are embedded in `eventType`:
+
+- `llm.tokens.v1` — current token usage schema
+- `llm.image.v1` — current image generation schema
+- `storage.sample.v1`, `bandwidth.sample.v1`
+
+The billing service validates each payload against its registered schema version. The pricing engine must be able to price multiple schema versions in parallel during migration windows.
 
 ## Shared Client SDK
 

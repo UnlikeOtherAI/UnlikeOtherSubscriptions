@@ -19,6 +19,50 @@ This file is the **source of truth** for all development on UnlikeOtherSubscript
 - Use `gh release create` with proper release notes describing what changed, what broke (if anything), and how to migrate.
 - Tags must follow [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`.
 
+## API Compatibility Contract
+
+This service is the **billing backbone for many services** and must be treated as a public API with a must-not-break contract.
+
+### Versioning
+
+- Major versions live in the URL path: `/v1/...`, `/v2/...`
+- **Never** ship silent breaking changes inside a major version
+- Minor/patch changes are **additive only**
+
+### What's Allowed in v1 (Backwards-Compatible)
+
+- Add new endpoints, optional request/response fields, new enum values, new event types
+- Loosen validation (accept more inputs)
+
+### What's Forbidden in v1 (Breaking)
+
+- Remove or rename fields
+- Make optional fields required
+- Change field type, units, or meaning
+- Change default behaviour affecting billing/entitlements
+- Narrow validation (reject inputs that previously passed)
+
+### Event Schema Versioning
+
+- Usage event payloads are versioned via `eventType`: `llm.tokens.v1`, `llm.image.v1`, etc.
+- The billing service must validate payloads against registered schemas
+- The pricing engine must price multiple schema versions in parallel during migration windows
+
+### CI Enforcement (Non-Negotiable)
+
+- **OpenAPI spec per version** stored in repo: `openapi/v1.yaml`
+- CI must run a "no breaking changes" diff on every PR against the previous release
+- Usage event JSON Schemas must be checked for backwards compatibility
+- **Contract tests** with golden fixtures for key endpoints and webhook handlers
+- **If CI detects a breaking change without `/v2`, the build must fail**
+
+### Deprecation Policy
+
+- Ship `/v2` alongside `/v1` (both run concurrently)
+- Announce end-of-life for old version (12-24 months for external clients)
+- Emit `Deprecation` and `Sunset` HTTP headers
+- Provide migration guide + SDK support for both versions
+
 ## Security
 
 **It is of the utmost importance to maintain security at all times.**
