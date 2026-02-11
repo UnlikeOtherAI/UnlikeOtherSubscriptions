@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { buildServer } from "../lib/server.js";
-import type { FastifyInstance } from "fastify";
+import Fastify, { FastifyInstance } from "fastify";
+import { registerCorrelationId } from "./correlation-id.js";
+import { Writable } from "node:stream";
 
 vi.mock("../lib/prisma.js", () => ({
   getPrismaClient: () => ({
@@ -10,16 +11,45 @@ vi.mock("../lib/prisma.js", () => ({
   disconnectPrisma: vi.fn(),
 }));
 
+vi.mock("../lib/pg-boss.js", () => ({
+  stopBoss: vi.fn(),
+}));
+
+function buildTestServer(): { app: FastifyInstance; logLines: string[] } {
+  const logLines: string[] = [];
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      logLines.push(chunk.toString());
+      callback();
+    },
+  });
+
+  const app = Fastify({
+    logger: {
+      level: "info",
+      stream,
+    },
+    requestIdHeader: false,
+  });
+
+  registerCorrelationId(app);
+
+  app.get("/test/echo-request-id", async (request) => {
+    request.log.info("test log message");
+    return { requestId: request.requestId };
+  });
+
+  return { app, logLines };
+}
+
 describe("Correlation ID middleware", () => {
   let app: FastifyInstance;
+  let logLines: string[];
 
   beforeEach(async () => {
-    app = buildServer();
-
-    app.get("/test/echo-request-id", async (request, reply) => {
-      return { requestId: request.requestId };
-    });
-
+    const server = buildTestServer();
+    app = server.app;
+    logLines = server.logLines;
     await app.ready();
   });
 
@@ -74,16 +104,13 @@ describe("Correlation ID middleware", () => {
   });
 
   it("includes request ID on every response", async () => {
-    // Make multiple requests and verify each has a unique ID
     const responses = await Promise.all([
       app.inject({ method: "GET", url: "/test/echo-request-id" }),
       app.inject({ method: "GET", url: "/test/echo-request-id" }),
       app.inject({ method: "GET", url: "/test/echo-request-id" }),
     ]);
 
-    const ids = responses.map(
-      (r) => r.headers["x-request-id"] as string
-    );
+    const ids = responses.map((r) => r.headers["x-request-id"] as string);
     const uniqueIds = new Set(ids);
 
     expect(uniqueIds.size).toBe(3);
@@ -91,5 +118,48 @@ describe("Correlation ID middleware", () => {
       expect(id).toBeDefined();
       expect(id.length).toBeGreaterThan(0);
     });
+  });
+
+  it("attaches correlation ID to Pino logger child context in logs", async () => {
+    const incomingId = "log-test-correlation-id";
+    await app.inject({
+      method: "GET",
+      url: "/test/echo-request-id",
+      headers: {
+        "x-request-id": incomingId,
+      },
+    });
+
+    const logWithRequestId = logLines.find((line) => {
+      const parsed = JSON.parse(line);
+      return (
+        parsed.requestId === incomingId && parsed.msg === "test log message"
+      );
+    });
+
+    expect(logWithRequestId).toBeDefined();
+    const parsed = JSON.parse(logWithRequestId!);
+    expect(parsed.requestId).toBe(incomingId);
+  });
+
+  it("includes generated correlation ID in log output", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/test/echo-request-id",
+    });
+
+    const headerRequestId = response.headers["x-request-id"] as string;
+
+    const logWithRequestId = logLines.find((line) => {
+      const parsed = JSON.parse(line);
+      return (
+        parsed.requestId === headerRequestId &&
+        parsed.msg === "test log message"
+      );
+    });
+
+    expect(logWithRequestId).toBeDefined();
+    const parsed = JSON.parse(logWithRequestId!);
+    expect(parsed.requestId).toBe(headerRequestId);
   });
 });

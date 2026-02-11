@@ -2,18 +2,28 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildServer } from "../lib/server.js";
 import type { FastifyInstance } from "fastify";
 
+const { mockDisconnectPrisma, mockStopBoss } = vi.hoisted(() => ({
+  mockDisconnectPrisma: vi.fn(),
+  mockStopBoss: vi.fn(),
+}));
+
 vi.mock("../lib/prisma.js", () => ({
   getPrismaClient: () => ({
     $queryRaw: vi.fn(),
     $disconnect: vi.fn(),
   }),
-  disconnectPrisma: vi.fn(),
+  disconnectPrisma: mockDisconnectPrisma,
+}));
+
+vi.mock("../lib/pg-boss.js", () => ({
+  stopBoss: mockStopBoss,
 }));
 
 describe("Server", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
+    vi.clearAllMocks();
     app = buildServer();
     await app.ready();
   });
@@ -45,12 +55,10 @@ describe("Server", () => {
     expect(response.statusCode).toBe(404);
   });
 
-  it("shuts down gracefully", async () => {
-    const disconnectPrisma = (await import("../lib/prisma.js"))
-      .disconnectPrisma;
-
+  it("shuts down gracefully calling Prisma disconnect and pg-boss stop", async () => {
     await app.close();
-    // Verify that closing the app doesn't throw
-    expect(true).toBe(true);
+
+    expect(mockStopBoss).toHaveBeenCalledTimes(1);
+    expect(mockDisconnectPrisma).toHaveBeenCalledTimes(1);
   });
 });

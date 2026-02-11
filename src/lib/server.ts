@@ -2,6 +2,8 @@ import Fastify, { FastifyInstance } from "fastify";
 import { registerCorrelationId } from "../middleware/correlation-id.js";
 import { registerErrorHandler } from "../middleware/error-handler.js";
 import { healthRoutes } from "../routes/health.js";
+import { disconnectPrisma } from "./prisma.js";
+import { stopBoss } from "./pg-boss.js";
 
 export function buildServer(): FastifyInstance {
   const app = Fastify({
@@ -20,6 +22,11 @@ export function buildServer(): FastifyInstance {
   registerErrorHandler(app);
 
   app.register(healthRoutes);
+
+  app.addHook("onClose", async () => {
+    await stopBoss();
+    await disconnectPrisma();
+  });
 
   return app;
 }

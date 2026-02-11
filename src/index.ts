@@ -1,5 +1,4 @@
 import { buildServer } from "./lib/server.js";
-import { disconnectPrisma } from "./lib/prisma.js";
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -11,8 +10,6 @@ async function main(): Promise<void> {
     app.log.info({ signal }, "Received shutdown signal, closing gracefully");
     try {
       await app.close();
-      await disconnectPrisma();
-      // pg-boss shutdown will be added when pg-boss is initialised
       app.log.info("Graceful shutdown complete");
       process.exit(0);
     } catch (err) {

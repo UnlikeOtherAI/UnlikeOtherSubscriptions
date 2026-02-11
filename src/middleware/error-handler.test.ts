@@ -11,6 +11,10 @@ vi.mock("../lib/prisma.js", () => ({
   disconnectPrisma: vi.fn(),
 }));
 
+vi.mock("../lib/pg-boss.js", () => ({
+  stopBoss: vi.fn(),
+}));
+
 describe("Error handler", () => {
   let app: FastifyInstance;
 

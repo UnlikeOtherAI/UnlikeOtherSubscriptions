@@ -15,6 +15,10 @@ vi.mock("../lib/prisma.js", () => {
   };
 });
 
+vi.mock("../lib/pg-boss.js", () => ({
+  stopBoss: vi.fn(),
+}));
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let mockPrisma: any;
 
