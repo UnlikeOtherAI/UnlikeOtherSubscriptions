@@ -146,6 +146,23 @@ function setupMocks(): void {
     },
   );
 
+  mockPrisma.teamMember.update.mockImplementation(
+    ({
+      where,
+      data,
+    }: {
+      where: { teamId_userId: { teamId: string; userId: string } };
+      data: Record<string, unknown>;
+    }) => {
+      const key = `${where.teamId_userId.teamId}:${where.teamId_userId.userId}`;
+      const existing = teamMembers.get(key);
+      if (!existing) return Promise.resolve(null);
+      const updated = { ...existing, ...data };
+      teamMembers.set(key, updated);
+      return Promise.resolve(updated);
+    },
+  );
+
   mockPrisma.teamMember.count.mockImplementation(
     ({ where }: { where: { teamId: string; status: string } }) => {
       let count = 0;
@@ -316,5 +333,57 @@ describe("POST /v1/apps/:appId/teams/:teamId/users", () => {
     });
 
     expect(response.statusCode).toBe(400);
+  });
+
+  it("reactivates a REMOVED membership on re-add with ACTIVE status and increased seat count", async () => {
+    // Step 1: Add the member initially
+    const addResponse = await app.inject({
+      method: "POST",
+      url: `/v1/apps/${TEST_APP_ID}/teams/${TEST_TEAM_ID}/users`,
+      payload: { userId: TEST_USER_ID },
+      headers: authHeaders(),
+    });
+    expect(addResponse.statusCode).toBe(200);
+    expect(addResponse.json().member.status).toBe("ACTIVE");
+
+    // Verify active seat count is 1
+    const countAfterAdd = await mockPrisma.teamMember.count({
+      where: { teamId: TEST_TEAM_ID, status: "ACTIVE" },
+    });
+    expect(countAfterAdd).toBe(1);
+
+    // Step 2: Remove the member (simulate soft delete)
+    const key = `${TEST_TEAM_ID}:${TEST_USER_ID}`;
+    const existing = teamMembers.get(key)!;
+    teamMembers.set(key, {
+      ...existing,
+      status: "REMOVED",
+      endedAt: new Date("2025-06-01"),
+    });
+
+    // Verify active seat count dropped to 0
+    const countAfterRemove = await mockPrisma.teamMember.count({
+      where: { teamId: TEST_TEAM_ID, status: "ACTIVE" },
+    });
+    expect(countAfterRemove).toBe(0);
+
+    // Step 3: Re-add the same user via POST endpoint
+    const readdResponse = await app.inject({
+      method: "POST",
+      url: `/v1/apps/${TEST_APP_ID}/teams/${TEST_TEAM_ID}/users`,
+      payload: { userId: TEST_USER_ID },
+      headers: authHeaders(),
+    });
+
+    expect(readdResponse.statusCode).toBe(200);
+    const readdBody = readdResponse.json();
+    expect(readdBody.member.status).toBe("ACTIVE");
+    expect(readdBody.member.endedAt).toBeNull();
+
+    // Step 4: Verify active seat count increased back to 1
+    const countAfterReadd = await mockPrisma.teamMember.count({
+      where: { teamId: TEST_TEAM_ID, status: "ACTIVE" },
+    });
+    expect(countAfterReadd).toBe(1);
   });
 });

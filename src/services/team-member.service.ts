@@ -69,6 +69,36 @@ export class TeamMemberService {
       };
     }
 
+    // Reactivate a previously removed membership
+    if (existing && existing.status === "REMOVED") {
+      const reactivated = await prisma.teamMember.update({
+        where: {
+          teamId_userId: {
+            teamId: input.teamId,
+            userId: input.userId,
+          },
+        },
+        data: {
+          status: "ACTIVE",
+          endedAt: null,
+          role: input.role ?? existing.role,
+          startedAt: new Date(),
+        },
+      });
+
+      return {
+        member: {
+          id: reactivated.id,
+          teamId: reactivated.teamId,
+          userId: reactivated.userId,
+          role: reactivated.role,
+          status: reactivated.status,
+          startedAt: reactivated.startedAt,
+          endedAt: reactivated.endedAt,
+        },
+      };
+    }
+
     // Create new membership (handle P2002 for concurrent creates)
     try {
       const member = await prisma.teamMember.create({
@@ -96,8 +126,8 @@ export class TeamMemberService {
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === "P2002"
       ) {
-        // Concurrent create — return the existing record
-        const existingMember = await prisma.teamMember.findUnique({
+        // Concurrent create — re-read and handle (may be ACTIVE or REMOVED)
+        const race = await prisma.teamMember.findUnique({
           where: {
             teamId_userId: {
               teamId: input.teamId,
@@ -106,15 +136,44 @@ export class TeamMemberService {
           },
         });
 
+        if (race && race.status === "REMOVED") {
+          const reactivated = await prisma.teamMember.update({
+            where: {
+              teamId_userId: {
+                teamId: input.teamId,
+                userId: input.userId,
+              },
+            },
+            data: {
+              status: "ACTIVE",
+              endedAt: null,
+              role: input.role ?? race.role,
+              startedAt: new Date(),
+            },
+          });
+
+          return {
+            member: {
+              id: reactivated.id,
+              teamId: reactivated.teamId,
+              userId: reactivated.userId,
+              role: reactivated.role,
+              status: reactivated.status,
+              startedAt: reactivated.startedAt,
+              endedAt: reactivated.endedAt,
+            },
+          };
+        }
+
         return {
           member: {
-            id: existingMember!.id,
-            teamId: existingMember!.teamId,
-            userId: existingMember!.userId,
-            role: existingMember!.role,
-            status: existingMember!.status,
-            startedAt: existingMember!.startedAt,
-            endedAt: existingMember!.endedAt,
+            id: race!.id,
+            teamId: race!.teamId,
+            userId: race!.userId,
+            role: race!.role,
+            status: race!.status,
+            startedAt: race!.startedAt,
+            endedAt: race!.endedAt,
           },
         };
       }
