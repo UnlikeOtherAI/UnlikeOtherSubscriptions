@@ -153,3 +153,10 @@ model AppSecret {
 
   @@index([appId, status])
 }
+
+model JtiUsage {
+  jti       String   @id
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { buildServer } from "../lib/server.js";
-import { ZodError, z } from "zod";
+import Fastify from "fastify";
+import { z } from "zod";
 import type { FastifyInstance } from "fastify";
+import { registerCorrelationId } from "./correlation-id.js";
+import { registerErrorHandler } from "./error-handler.js";
 
 vi.mock("../lib/prisma.js", () => ({
   getPrismaClient: () => ({
@@ -15,11 +17,23 @@ vi.mock("../lib/pg-boss.js", () => ({
   stopBoss: vi.fn(),
 }));
 
+function buildTestServer(): FastifyInstance {
+  const app = Fastify({
+    logger: false,
+    requestIdHeader: false,
+  });
+
+  registerCorrelationId(app);
+  registerErrorHandler(app);
+
+  return app;
+}
+
 describe("Error handler", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
-    app = buildServer();
+    app = buildTestServer();
 
     // Register a test route that throws a ZodError
     app.get("/test/zod-error", async () => {

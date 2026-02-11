@@ -11,6 +11,8 @@ vi.mock("../lib/prisma.js", () => ({
   getPrismaClient: () => ({
     $queryRaw: vi.fn(),
     $disconnect: vi.fn(),
+    appSecret: { findUnique: vi.fn().mockResolvedValue(null) },
+    jtiUsage: { create: vi.fn() },
   }),
   disconnectPrisma: mockDisconnectPrisma,
 }));
@@ -46,13 +48,13 @@ describe("Server", () => {
     expect([200, 503]).toContain(response.statusCode);
   });
 
-  it("returns 404 for unknown routes", async () => {
+  it("returns 401 for unauthenticated unknown routes", async () => {
     const response = await app.inject({
       method: "GET",
       url: "/nonexistent",
     });
 
-    expect(response.statusCode).toBe(404);
+    expect(response.statusCode).toBe(401);
   });
 
   it("shuts down gracefully calling Prisma disconnect and pg-boss stop", async () => {

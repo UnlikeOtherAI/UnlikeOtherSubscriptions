@@ -1,6 +1,7 @@
 import Fastify, { FastifyInstance } from "fastify";
 import { registerCorrelationId } from "../middleware/correlation-id.js";
 import { registerErrorHandler } from "../middleware/error-handler.js";
+import { registerJwtAuth } from "../middleware/jwt-auth.js";
 import { healthRoutes } from "../routes/health.js";
 import { disconnectPrisma } from "./prisma.js";
 import { stopBoss } from "./pg-boss.js";
@@ -20,6 +21,7 @@ export function buildServer(): FastifyInstance {
 
   registerCorrelationId(app);
   registerErrorHandler(app);
+  registerJwtAuth(app);
 
   app.register(healthRoutes);
 
