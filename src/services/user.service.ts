@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../lib/prisma.js";
 
 export interface ProvisionUserInput {
@@ -26,7 +27,67 @@ export class UserService {
       throw new AppNotFoundError(input.appId);
     }
 
-    // Check if the user already exists (idempotent on appId+externalRef)
+    // Attempt atomic create; recover on P2002 (unique constraint on appId+externalRef)
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            appId: input.appId,
+            email: input.email,
+            externalRef: input.externalRef,
+          },
+        });
+
+        const team = await tx.team.create({
+          data: {
+            name: `${input.email}'s Personal Team`,
+            kind: "PERSONAL",
+            ownerUserId: user.id,
+            billingMode: "SUBSCRIPTION",
+          },
+        });
+
+        await tx.billingEntity.create({
+          data: {
+            type: "TEAM",
+            teamId: team.id,
+          },
+        });
+
+        await tx.teamMember.create({
+          data: {
+            teamId: team.id,
+            userId: user.id,
+            role: "OWNER",
+            status: "ACTIVE",
+          },
+        });
+
+        return {
+          user: {
+            id: user.id,
+            appId: user.appId,
+            email: user.email,
+            externalRef: user.externalRef,
+          },
+          personalTeamId: team.id,
+        };
+      });
+
+      return result;
+    } catch (err) {
+      // P2002: unique constraint violation on appId+externalRef — user was created concurrently
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        return this.findExistingUser(prisma, input);
+      }
+      throw err;
+    }
+  }
+
+  private async findExistingUser(
+    prisma: ReturnType<typeof getPrismaClient>,
+    input: ProvisionUserInput,
+  ): Promise<ProvisionUserResult> {
     const existingUser = await prisma.user.findUnique({
       where: {
         appId_externalRef: {
@@ -36,73 +97,22 @@ export class UserService {
       },
     });
 
-    if (existingUser) {
-      // Return existing records without modification
-      const personalTeam = await prisma.team.findFirst({
-        where: {
-          kind: "PERSONAL",
-          ownerUserId: existingUser.id,
-        },
-      });
-
-      return {
-        user: {
-          id: existingUser.id,
-          appId: existingUser.appId,
-          email: existingUser.email,
-          externalRef: existingUser.externalRef,
-        },
-        personalTeamId: personalTeam!.id,
-      };
-    }
-
-    // Create User + Personal Team + BillingEntity + TeamMember in a transaction
-    const result = await prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          appId: input.appId,
-          email: input.email,
-          externalRef: input.externalRef,
-        },
-      });
-
-      const team = await tx.team.create({
-        data: {
-          name: `${input.email}'s Personal Team`,
-          kind: "PERSONAL",
-          ownerUserId: user.id,
-          billingMode: "SUBSCRIPTION",
-        },
-      });
-
-      await tx.billingEntity.create({
-        data: {
-          type: "TEAM",
-          teamId: team.id,
-        },
-      });
-
-      await tx.teamMember.create({
-        data: {
-          teamId: team.id,
-          userId: user.id,
-          role: "OWNER",
-          status: "ACTIVE",
-        },
-      });
-
-      return {
-        user: {
-          id: user.id,
-          appId: user.appId,
-          email: user.email,
-          externalRef: user.externalRef,
-        },
-        personalTeamId: team.id,
-      };
+    const personalTeam = await prisma.team.findFirst({
+      where: {
+        kind: "PERSONAL",
+        ownerUserId: existingUser!.id,
+      },
     });
 
-    return result;
+    return {
+      user: {
+        id: existingUser!.id,
+        appId: existingUser!.appId,
+        email: existingUser!.email,
+        externalRef: existingUser!.externalRef,
+      },
+      personalTeamId: personalTeam!.id,
+    };
   }
 }
 

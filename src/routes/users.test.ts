@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { FastifyInstance } from "fastify";
+import { Prisma } from "@prisma/client";
 import { randomBytes } from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
 import { createTestJwt, buildUserTestApp } from "./users-test-helpers.js";
@@ -41,6 +42,13 @@ vi.mock("../lib/crypto.js", () => ({
   decryptSecret: (s: string) => s.replace("encrypted:", ""),
 }));
 
+function makeP2002Error(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    "Unique constraint failed on the fields: (`appId`,`externalRef`)",
+    { code: "P2002", clientVersion: "6.3.1", meta: { target: ["appId", "externalRef"] } },
+  );
+}
+
 function setupMocks(): void {
   // App lookup
   mockPrisma.app.findUnique.mockImplementation(({ where }: { where: { id: string } }) => {
@@ -67,7 +75,7 @@ function setupMocks(): void {
   // JTI usage for replay protection
   mockPrisma.jtiUsage.create.mockResolvedValue({});
 
-  // User lookup (by composite key)
+  // User lookup (by composite key) — used by P2002 recovery path
   mockPrisma.user.findUnique.mockImplementation(({ where }: { where: Record<string, unknown> }) => {
     if (where.appId_externalRef) {
       const key = where.appId_externalRef as { appId: string; externalRef: string };
@@ -77,7 +85,7 @@ function setupMocks(): void {
     return Promise.resolve(null);
   });
 
-  // Team findFirst for existing user's personal team
+  // Team findFirst for existing user's personal team (P2002 recovery path)
   mockPrisma.team.findFirst.mockImplementation(({ where }: { where: Record<string, unknown> }) => {
     for (const team of teams.values()) {
       if (team.kind === where.kind && team.ownerUserId === where.ownerUserId) {
@@ -87,15 +95,17 @@ function setupMocks(): void {
     return Promise.resolve(null);
   });
 
-  // Transaction mock: execute the callback with the same mock prisma
+  // Transaction mock: execute the callback; user.create throws P2002 if user already exists
   mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => Promise<unknown>) => {
-    // Create a tx object that mirrors mockPrisma but with implementations for creates
     const tx = {
       user: {
         create: vi.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+          const compositeKey = `${data.appId}:${data.externalRef}`;
+          if (users.has(compositeKey)) {
+            throw makeP2002Error();
+          }
           const id = uuidv4();
           const record = { id, ...data, createdAt: new Date(), updatedAt: new Date() };
-          const compositeKey = `${data.appId}:${data.externalRef}`;
           users.set(compositeKey, record);
           return Promise.resolve(record);
         }),
@@ -217,7 +227,7 @@ describe("POST /v1/apps/:appId/users", () => {
     const userId = body1.user.id;
     const personalTeamId = body1.personalTeamId;
 
-    // Second call: same externalRef, user already exists
+    // Second call: same externalRef — triggers P2002 in transaction, recovers via findUnique
     const response2 = await app.inject({
       method: "POST",
       url: `/v1/apps/${TEST_APP_ID}/users`,
@@ -231,8 +241,40 @@ describe("POST /v1/apps/:appId/users", () => {
     expect(body2.user.id).toBe(userId);
     expect(body2.personalTeamId).toBe(personalTeamId);
 
-    // Transaction should only have been called once (for the first creation)
-    expect(mockPrisma.$transaction).toHaveBeenCalledOnce();
+    // Both calls attempt the transaction; second hits P2002 and recovers
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("handles concurrent duplicate provisioning via P2002 recovery", async () => {
+    // Simulate two concurrent requests for the same appId+externalRef.
+    // Both hit $transaction; the first succeeds, the second gets P2002 and recovers.
+    const [response1, response2] = await Promise.all([
+      app.inject({
+        method: "POST",
+        url: `/v1/apps/${TEST_APP_ID}/users`,
+        payload: { email: "concurrent@example.com", externalRef: "ext-concurrent" },
+        headers: authHeaders(),
+      }),
+      app.inject({
+        method: "POST",
+        url: `/v1/apps/${TEST_APP_ID}/users`,
+        payload: { email: "concurrent@example.com", externalRef: "ext-concurrent" },
+        headers: authHeaders(),
+      }),
+    ]);
+
+    expect(response1.statusCode).toBe(200);
+    expect(response2.statusCode).toBe(200);
+
+    const body1 = response1.json();
+    const body2 = response2.json();
+
+    // Both return the same user.id and personalTeamId — no error
+    expect(body1.user.id).toBe(body2.user.id);
+    expect(body1.personalTeamId).toBe(body2.personalTeamId);
+
+    // Only one user record was created (no duplicates)
+    expect(users.size).toBe(1);
   });
 
   it("returns Personal Team with correct kind, owner, and billingMode", async () => {
