@@ -62,6 +62,8 @@ model App {
   bundleApps        BundleApp[]
   bundleMeterPolicies BundleMeterPolicy[]
   contractOverrides ContractOverride[]
+  priceBooks        PriceBook[]
+  billableLineItems BillableLineItem[]
 }
 
 model Team {
@@ -132,8 +134,9 @@ model BillingEntity {
   team           Team?          @relation(fields: [teamId], references: [id])
   ledgerAccounts LedgerAccount[]
   ledgerEntries  LedgerEntry[]
-  usageEvents    UsageEvent[]
-  contracts      Contract[]
+  usageEvents       UsageEvent[]
+  contracts         Contract[]
+  billableLineItems BillableLineItem[]
 }
 
 model ExternalTeamRef {

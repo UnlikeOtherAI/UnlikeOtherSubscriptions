@@ -1,0 +1,70 @@
+// ─── Pricing ────────────────────────────────────────────────────────────────
+
+enum PriceBookKind {
+  COGS
+  CUSTOMER
+}
+
+model PriceBook {
+  id            String         @id @default(uuid())
+  appId         String
+  kind          PriceBookKind
+  currency      String
+  version       Int            @default(1)
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  app   App         @relation(fields: [appId], references: [id])
+  rules PriceRule[]
+  billableLineItems BillableLineItem[]
+
+  @@index([appId, kind])
+  @@index([appId, effectiveFrom])
+}
+
+model PriceRule {
+  id          String @id @default(uuid())
+  priceBookId String
+  priority    Int
+  match       Json
+  rule        Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  priceBook PriceBook        @relation(fields: [priceBookId], references: [id])
+  billableLineItems BillableLineItem[]
+
+  @@index([priceBookId, priority])
+}
+
+// ─── Billable Line Items (Immutable) ────────────────────────────────────────
+
+model BillableLineItem {
+  id              String   @id @default(uuid())
+  appId           String
+  billToId        String
+  teamId          String
+  userId          String?
+  usageEventId    String?
+  timestamp       DateTime
+  priceBookId     String
+  priceRuleId     String
+  amountMinor     Int
+  currency        String
+  description     String
+  inputsSnapshot  Json
+
+  createdAt DateTime @default(now())
+
+  app           App           @relation(fields: [appId], references: [id])
+  billingEntity BillingEntity @relation(fields: [billToId], references: [id])
+  priceBook     PriceBook     @relation(fields: [priceBookId], references: [id])
+  priceRule     PriceRule     @relation(fields: [priceRuleId], references: [id])
+
+  @@index([appId, teamId, timestamp])
+  @@index([billToId, timestamp])
+}
