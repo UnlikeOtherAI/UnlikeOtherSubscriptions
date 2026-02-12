@@ -65,7 +65,7 @@ model LedgerEntry {
 // ─── Usage Events (Immutable) ─────────────────────────────────────────────
 
 model UsageEvent {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   appId          String
   teamId         String
   billToId       String
@@ -75,6 +75,7 @@ model UsageEvent {
   idempotencyKey String
   payload        Json
   source         String
+  pricedAt       DateTime?
 
   createdAt DateTime @default(now())
 

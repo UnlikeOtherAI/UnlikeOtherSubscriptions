@@ -82,6 +82,7 @@ function makeUsageEvent(
     idempotencyKey: overrides.idempotencyKey ?? `key-${randomSuffix()}`,
     payload: payload as unknown as Prisma.JsonValue,
     source: overrides.source ?? "test",
+    pricedAt: overrides.pricedAt ?? null,
     createdAt: overrides.createdAt ?? new Date(),
   };
 }
