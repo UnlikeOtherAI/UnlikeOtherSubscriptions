@@ -84,6 +84,7 @@ model Team {
   externalRefs  ExternalTeamRef[]
   subscriptions TeamSubscription[]
   teamAddons    TeamAddon[]
+  walletConfigs WalletConfig[]
 
   // Unique partial index: one Personal Team per user
   // Prisma doesn't natively support partial unique indexes, so we use raw SQL

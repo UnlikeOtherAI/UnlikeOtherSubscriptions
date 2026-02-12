@@ -16,6 +16,7 @@ import { usageEventRoutes } from "../routes/usage-events.js";
 import { contractRoutes } from "../routes/contracts.js";
 import { bundleRoutes } from "../routes/bundles.js";
 import { ledgerRoutes } from "../routes/ledger.js";
+import { topupRoutes } from "../routes/topup.js";
 import { disconnectPrisma } from "./prisma.js";
 import { stopBoss } from "./pg-boss.js";
 
@@ -43,6 +44,7 @@ export function buildServer(): FastifyInstance {
   app.register(teamRoutes);
   app.register(teamMemberRoutes);
   app.register(checkoutRoutes);
+  app.register(topupRoutes);
   app.register(portalRoutes);
   app.register(entitlementRoutes);
   app.register(usageEventRoutes);

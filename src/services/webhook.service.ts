@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import { getPrismaClient } from "../lib/prisma.js";
 import { getStripeClient } from "../lib/stripe.js";
 import { SubscriptionHandlerService } from "./subscription-handler.service.js";
+import { TopupService } from "./topup.service.js";
 
 export class WebhookSignatureError extends Error {
   constructor(message: string) {
@@ -30,10 +31,15 @@ const HANDLED_EVENT_TYPES = new Set([
 
 export class WebhookService {
   private subscriptionHandler: SubscriptionHandlerService;
+  private topupService: TopupService;
 
-  constructor(subscriptionHandler?: SubscriptionHandlerService) {
+  constructor(
+    subscriptionHandler?: SubscriptionHandlerService,
+    topupService?: TopupService,
+  ) {
     this.subscriptionHandler =
       subscriptionHandler ?? new SubscriptionHandlerService();
+    this.topupService = topupService ?? new TopupService();
   }
 
   /**
@@ -116,10 +122,29 @@ export class WebhookService {
       case "invoice.payment_failed":
         await this.subscriptionHandler.handleInvoicePaymentFailed(event);
         break;
-      // payment_intent.succeeded and payment_intent.failed are acknowledged
-      // but handled by future wallet top-up implementation
+      case "payment_intent.succeeded":
+        await this.handlePaymentIntentSucceeded(event);
+        break;
+      // payment_intent.failed is acknowledged but not processed
     }
 
     return true;
+  }
+
+  /**
+   * Handle payment_intent.succeeded: delegate to TopupService for wallet top-ups.
+   */
+  private async handlePaymentIntentSucceeded(
+    event: Stripe.Event,
+  ): Promise<void> {
+    const paymentIntent = event.data.object as Stripe.PaymentIntent;
+
+    await this.topupService.handlePaymentIntentSucceeded(
+      event.id,
+      paymentIntent.id,
+      paymentIntent.amount,
+      paymentIntent.currency,
+      (paymentIntent.metadata ?? {}) as Record<string, string>,
+    );
   }
 }

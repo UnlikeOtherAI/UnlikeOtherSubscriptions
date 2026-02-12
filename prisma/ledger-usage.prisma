@@ -88,6 +88,25 @@ model UsageEvent {
   @@index([billToId, timestamp])
 }
 
+// ─── Wallet Configuration ─────────────────────────────────────────────────
+
+model WalletConfig {
+  id                  String  @id @default(uuid())
+  teamId              String
+  appId               String
+  autoTopUpEnabled    Boolean @default(false)
+  thresholdMinor      Int     @default(0)
+  topUpAmountMinor    Int     @default(0)
+  currency            String  @default("usd")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id])
+
+  @@unique([teamId, appId])
+}
+
 // ─── Stripe Webhooks ────────────────────────────────────────────────────────
 
 model StripeWebhookEvent {
