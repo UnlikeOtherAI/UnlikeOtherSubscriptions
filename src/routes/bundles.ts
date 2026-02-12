@@ -41,7 +41,7 @@ const updateBundleBodySchema = z.object({
 export async function bundleRoutes(app: FastifyInstance): Promise<void> {
   const bundleService = new BundleService();
 
-  app.post("/v1/admin/bundles", async (request, reply) => {
+  app.post("/v1/bundles", async (request, reply) => {
     const body = createBundleBodySchema.parse(request.body);
 
     try {
@@ -60,7 +60,7 @@ export async function bundleRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.patch("/v1/admin/bundles/:id", async (request, reply) => {
+  app.patch("/v1/bundles/:id", async (request, reply) => {
     const params = bundleIdParamSchema.parse(request.params);
     const body = updateBundleBodySchema.parse(request.body);
 

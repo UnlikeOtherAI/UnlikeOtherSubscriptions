@@ -140,7 +140,7 @@ function setupMocks(): void {
   );
 }
 
-describe("PUT /v1/admin/contracts/:id/overrides", () => {
+describe("PUT /v1/contracts/:id/overrides", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -159,7 +159,7 @@ describe("PUT /v1/admin/contracts/:id/overrides", () => {
   it("replaces all overrides for a contract", async () => {
     const createResp = await app.inject({
       method: "POST",
-      url: "/v1/admin/contracts",
+      url: "/v1/contracts",
       headers: adminHeaders(),
       payload: {
         billToId: BILLING_ENTITY_ID,
@@ -197,7 +197,7 @@ describe("PUT /v1/admin/contracts/:id/overrides", () => {
 
     const response = await app.inject({
       method: "PUT",
-      url: `/v1/admin/contracts/${contractId}/overrides`,
+      url: `/v1/contracts/${contractId}/overrides`,
       headers: adminHeaders(),
       payload: overrideData,
     });
@@ -213,7 +213,7 @@ describe("PUT /v1/admin/contracts/:id/overrides", () => {
   it("returns 404 for nonexistent contract", async () => {
     const response = await app.inject({
       method: "PUT",
-      url: `/v1/admin/contracts/${uuidv4()}/overrides`,
+      url: `/v1/contracts/${uuidv4()}/overrides`,
       headers: adminHeaders(),
       payload: [],
     });
@@ -224,7 +224,7 @@ describe("PUT /v1/admin/contracts/:id/overrides", () => {
   it("clears all overrides when empty array provided", async () => {
     const createResp = await app.inject({
       method: "POST",
-      url: "/v1/admin/contracts",
+      url: "/v1/contracts",
       headers: adminHeaders(),
       payload: {
         billToId: BILLING_ENTITY_ID,
@@ -242,7 +242,7 @@ describe("PUT /v1/admin/contracts/:id/overrides", () => {
 
     const response = await app.inject({
       method: "PUT",
-      url: `/v1/admin/contracts/${contractId}/overrides`,
+      url: `/v1/contracts/${contractId}/overrides`,
       headers: adminHeaders(),
       payload: [],
     });
@@ -257,7 +257,7 @@ describe("PUT /v1/admin/contracts/:id/overrides", () => {
   it("returns 400 for invalid override data", async () => {
     const createResp = await app.inject({
       method: "POST",
-      url: "/v1/admin/contracts",
+      url: "/v1/contracts",
       headers: adminHeaders(),
       payload: {
         billToId: BILLING_ENTITY_ID,
@@ -273,11 +273,33 @@ describe("PUT /v1/admin/contracts/:id/overrides", () => {
 
     const response = await app.inject({
       method: "PUT",
-      url: `/v1/admin/contracts/${contractId}/overrides`,
+      url: `/v1/contracts/${contractId}/overrides`,
       headers: adminHeaders(),
       payload: [{ appId: "not-a-uuid", meterKey: "" }],
     });
 
     expect(response.statusCode).toBe(400);
+  });
+
+  it("returns 403 without admin API key", async () => {
+    const response = await app.inject({
+      method: "PUT",
+      url: `/v1/contracts/${uuidv4()}/overrides`,
+      payload: [],
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it("returns 403 with invalid admin API key", async () => {
+    const response = await app.inject({
+      method: "PUT",
+      url: `/v1/contracts/${uuidv4()}/overrides`,
+      headers: { "x-admin-api-key": "wrong-key" },
+      payload: [],
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().message).toBe("Invalid admin API key");
   });
 });

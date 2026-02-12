@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { getPrismaClient } from "../lib/prisma.js";
 import { decryptSecret } from "../lib/crypto.js";
 import type { JwtClaims } from "../types/fastify.js";
+import { isAdminRoute } from "./admin-routes.js";
 
 const EXPECTED_AUDIENCE = "billing-service";
 
@@ -141,7 +142,7 @@ export function registerJwtAuth(app: FastifyInstance): void {
     }
 
     // Skip JWT auth for admin routes — they are secured by the admin API key middleware
-    if (request.url.startsWith("/v1/admin/") || (routePath && routePath.startsWith("/v1/admin/"))) {
+    if (isAdminRoute(request.url, routePath)) {
       return;
     }
 

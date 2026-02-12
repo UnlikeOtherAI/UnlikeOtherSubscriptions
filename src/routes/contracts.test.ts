@@ -140,7 +140,7 @@ function setupMocks(): void {
   );
 }
 
-describe("POST /v1/admin/contracts", () => {
+describe("POST /v1/contracts", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -159,7 +159,7 @@ describe("POST /v1/admin/contracts", () => {
   it("creates a contract in DRAFT status", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/v1/admin/contracts",
+      url: "/v1/contracts",
       headers: adminHeaders(),
       payload: {
         billToId: BILLING_ENTITY_ID,
@@ -183,7 +183,7 @@ describe("POST /v1/admin/contracts", () => {
   it("returns 404 for nonexistent billToId", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/v1/admin/contracts",
+      url: "/v1/contracts",
       headers: adminHeaders(),
       payload: {
         billToId: uuidv4(),
@@ -203,7 +203,7 @@ describe("POST /v1/admin/contracts", () => {
   it("returns 404 for nonexistent bundleId", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/v1/admin/contracts",
+      url: "/v1/contracts",
       headers: adminHeaders(),
       payload: {
         billToId: BILLING_ENTITY_ID,
@@ -223,7 +223,7 @@ describe("POST /v1/admin/contracts", () => {
   it("returns 400 for invalid payload", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/v1/admin/contracts",
+      url: "/v1/contracts",
       headers: adminHeaders(),
       payload: { billToId: "not-a-uuid" },
     });
@@ -234,7 +234,7 @@ describe("POST /v1/admin/contracts", () => {
   it("returns 403 without admin API key", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/v1/admin/contracts",
+      url: "/v1/contracts",
       payload: {
         billToId: BILLING_ENTITY_ID,
         bundleId: BUNDLE_ID,
@@ -248,9 +248,29 @@ describe("POST /v1/admin/contracts", () => {
 
     expect(response.statusCode).toBe(403);
   });
+
+  it("returns 403 with invalid admin API key", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/contracts",
+      headers: { "x-admin-api-key": "wrong-key" },
+      payload: {
+        billToId: BILLING_ENTITY_ID,
+        bundleId: BUNDLE_ID,
+        currency: "USD",
+        billingPeriod: "MONTHLY",
+        termsDays: 30,
+        pricingMode: "FIXED",
+        startsAt: "2025-01-01T00:00:00.000Z",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().message).toBe("Invalid admin API key");
+  });
 });
 
-describe("PATCH /v1/admin/contracts/:id", () => {
+describe("PATCH /v1/contracts/:id", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -269,7 +289,7 @@ describe("PATCH /v1/admin/contracts/:id", () => {
   it("activates a contract when no other ACTIVE contract exists", async () => {
     const createResp = await app.inject({
       method: "POST",
-      url: "/v1/admin/contracts",
+      url: "/v1/contracts",
       headers: adminHeaders(),
       payload: {
         billToId: BILLING_ENTITY_ID,
@@ -285,7 +305,7 @@ describe("PATCH /v1/admin/contracts/:id", () => {
 
     const response = await app.inject({
       method: "PATCH",
-      url: `/v1/admin/contracts/${contractId}`,
+      url: `/v1/contracts/${contractId}`,
       headers: adminHeaders(),
       payload: { status: "ACTIVE" },
     });
@@ -298,7 +318,7 @@ describe("PATCH /v1/admin/contracts/:id", () => {
   it("returns 409 when activating a second contract for same billToId", async () => {
     const createResp1 = await app.inject({
       method: "POST",
-      url: "/v1/admin/contracts",
+      url: "/v1/contracts",
       headers: adminHeaders(),
       payload: {
         billToId: BILLING_ENTITY_ID,
@@ -314,14 +334,14 @@ describe("PATCH /v1/admin/contracts/:id", () => {
 
     await app.inject({
       method: "PATCH",
-      url: `/v1/admin/contracts/${contract1Id}`,
+      url: `/v1/contracts/${contract1Id}`,
       headers: adminHeaders(),
       payload: { status: "ACTIVE" },
     });
 
     const createResp2 = await app.inject({
       method: "POST",
-      url: "/v1/admin/contracts",
+      url: "/v1/contracts",
       headers: adminHeaders(),
       payload: {
         billToId: BILLING_ENTITY_ID,
@@ -343,7 +363,7 @@ describe("PATCH /v1/admin/contracts/:id", () => {
 
     const response = await app.inject({
       method: "PATCH",
-      url: `/v1/admin/contracts/${contract2Id}`,
+      url: `/v1/contracts/${contract2Id}`,
       headers: adminHeaders(),
       payload: { status: "ACTIVE" },
     });
@@ -355,7 +375,7 @@ describe("PATCH /v1/admin/contracts/:id", () => {
   it("returns 404 for nonexistent contract", async () => {
     const response = await app.inject({
       method: "PATCH",
-      url: `/v1/admin/contracts/${uuidv4()}`,
+      url: `/v1/contracts/${uuidv4()}`,
       headers: adminHeaders(),
       payload: { status: "ACTIVE" },
     });
@@ -367,7 +387,7 @@ describe("PATCH /v1/admin/contracts/:id", () => {
   it("updates pricingMode on a contract", async () => {
     const createResp = await app.inject({
       method: "POST",
-      url: "/v1/admin/contracts",
+      url: "/v1/contracts",
       headers: adminHeaders(),
       payload: {
         billToId: BILLING_ENTITY_ID,
@@ -383,12 +403,24 @@ describe("PATCH /v1/admin/contracts/:id", () => {
 
     const response = await app.inject({
       method: "PATCH",
-      url: `/v1/admin/contracts/${contractId}`,
+      url: `/v1/contracts/${contractId}`,
       headers: adminHeaders(),
       payload: { pricingMode: "MIN_COMMIT_TRUEUP" },
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json().pricingMode).toBe("MIN_COMMIT_TRUEUP");
+  });
+
+  it("returns 403 with invalid admin API key", async () => {
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/v1/contracts/${uuidv4()}`,
+      headers: { "x-admin-api-key": "wrong-key" },
+      payload: { status: "ACTIVE" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().message).toBe("Invalid admin API key");
   });
 });

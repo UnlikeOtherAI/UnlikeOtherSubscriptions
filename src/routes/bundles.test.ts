@@ -140,7 +140,7 @@ function setupMocks(): void {
   mockPrisma.contract.findMany.mockResolvedValue([]);
 }
 
-describe("POST /v1/admin/bundles", () => {
+describe("POST /v1/bundles", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -159,7 +159,7 @@ describe("POST /v1/admin/bundles", () => {
   it("creates a bundle with apps and meter policies", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/v1/admin/bundles",
+      url: "/v1/bundles",
       headers: adminHeaders(),
       payload: {
         code: "enterprise_all",
@@ -194,7 +194,7 @@ describe("POST /v1/admin/bundles", () => {
   it("creates a bundle without apps or policies", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/v1/admin/bundles",
+      url: "/v1/bundles",
       headers: adminHeaders(),
       payload: {
         code: "basic_bundle",
@@ -212,7 +212,7 @@ describe("POST /v1/admin/bundles", () => {
   it("returns 409 for duplicate bundle code", async () => {
     await app.inject({
       method: "POST",
-      url: "/v1/admin/bundles",
+      url: "/v1/bundles",
       headers: adminHeaders(),
       payload: {
         code: "duplicate_code",
@@ -222,7 +222,7 @@ describe("POST /v1/admin/bundles", () => {
 
     const response = await app.inject({
       method: "POST",
-      url: "/v1/admin/bundles",
+      url: "/v1/bundles",
       headers: adminHeaders(),
       payload: {
         code: "duplicate_code",
@@ -237,7 +237,7 @@ describe("POST /v1/admin/bundles", () => {
   it("returns 400 for missing required fields", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/v1/admin/bundles",
+      url: "/v1/bundles",
       headers: adminHeaders(),
       payload: { name: "No Code" },
     });
@@ -248,7 +248,7 @@ describe("POST /v1/admin/bundles", () => {
   it("returns 403 without admin API key", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/v1/admin/bundles",
+      url: "/v1/bundles",
       payload: {
         code: "test",
         name: "Test",
@@ -257,9 +257,24 @@ describe("POST /v1/admin/bundles", () => {
 
     expect(response.statusCode).toBe(403);
   });
+
+  it("returns 403 with invalid admin API key", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: { "x-admin-api-key": "wrong-key" },
+      payload: {
+        code: "test",
+        name: "Test",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().message).toBe("Invalid admin API key");
+  });
 });
 
-describe("PATCH /v1/admin/bundles/:id", () => {
+describe("PATCH /v1/bundles/:id", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -278,7 +293,7 @@ describe("PATCH /v1/admin/bundles/:id", () => {
   it("updates bundle apps", async () => {
     const createResp = await app.inject({
       method: "POST",
-      url: "/v1/admin/bundles",
+      url: "/v1/bundles",
       headers: adminHeaders(),
       payload: {
         code: "updatable_bundle",
@@ -291,7 +306,7 @@ describe("PATCH /v1/admin/bundles/:id", () => {
     const newAppId = uuidv4();
     const response = await app.inject({
       method: "PATCH",
-      url: `/v1/admin/bundles/${bundleId}`,
+      url: `/v1/bundles/${bundleId}`,
       headers: adminHeaders(),
       payload: {
         apps: [
@@ -309,7 +324,7 @@ describe("PATCH /v1/admin/bundles/:id", () => {
   it("updates bundle meter policies", async () => {
     const createResp = await app.inject({
       method: "POST",
-      url: "/v1/admin/bundles",
+      url: "/v1/bundles",
       headers: adminHeaders(),
       payload: {
         code: "policy_update_bundle",
@@ -320,7 +335,7 @@ describe("PATCH /v1/admin/bundles/:id", () => {
 
     const response = await app.inject({
       method: "PATCH",
-      url: `/v1/admin/bundles/${bundleId}`,
+      url: `/v1/bundles/${bundleId}`,
       headers: adminHeaders(),
       payload: {
         meterPolicies: [
@@ -345,7 +360,7 @@ describe("PATCH /v1/admin/bundles/:id", () => {
   it("returns 404 for nonexistent bundle", async () => {
     const response = await app.inject({
       method: "PATCH",
-      url: `/v1/admin/bundles/${uuidv4()}`,
+      url: `/v1/bundles/${uuidv4()}`,
       headers: adminHeaders(),
       payload: { name: "Updated" },
     });
@@ -357,7 +372,7 @@ describe("PATCH /v1/admin/bundles/:id", () => {
   it("updates bundle name", async () => {
     const createResp = await app.inject({
       method: "POST",
-      url: "/v1/admin/bundles",
+      url: "/v1/bundles",
       headers: adminHeaders(),
       payload: {
         code: "rename_bundle",
@@ -368,12 +383,24 @@ describe("PATCH /v1/admin/bundles/:id", () => {
 
     const response = await app.inject({
       method: "PATCH",
-      url: `/v1/admin/bundles/${bundleId}`,
+      url: `/v1/bundles/${bundleId}`,
       headers: adminHeaders(),
       payload: { name: "Updated Name" },
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json().name).toBe("Updated Name");
+  });
+
+  it("returns 403 with invalid admin API key", async () => {
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/v1/bundles/${uuidv4()}`,
+      headers: { "x-admin-api-key": "wrong-key" },
+      payload: { name: "Updated" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().message).toBe("Invalid admin API key");
   });
 });

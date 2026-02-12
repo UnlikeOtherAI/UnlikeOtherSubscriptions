@@ -1,7 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { timingSafeEqual } from "node:crypto";
-
-const ADMIN_PREFIX = "/v1/admin/";
+import { isAdminRoute } from "./admin-routes.js";
 
 function getAdminApiKey(): string {
   const key = process.env.ADMIN_API_KEY;
@@ -25,11 +24,7 @@ export function registerAdminAuth(app: FastifyInstance): void {
     const requestId = request.requestId ?? "unknown";
     const routePath = request.routeOptions?.url;
 
-    const isAdmin =
-      request.url.startsWith(ADMIN_PREFIX) ||
-      (routePath !== undefined && routePath.startsWith(ADMIN_PREFIX));
-
-    if (!isAdmin) {
+    if (!isAdminRoute(request.url, routePath)) {
       return;
     }
 
