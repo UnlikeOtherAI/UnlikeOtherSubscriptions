@@ -285,8 +285,10 @@ describe("PeriodCloseService", () => {
         (li) => li.type === "USAGE_TRUEUP",
       );
       expect(trueupLines).toHaveLength(1);
-      expect(trueupLines[0].amountMinor).toBe(150);
+      // Detail lines are informational only — amountMinor is 0 to avoid double-charging
+      expect(trueupLines[0].amountMinor).toBe(0);
     });
+
   });
 
   describe("CUSTOM_INVOICE_ONLY mode", () => {
@@ -486,4 +488,5 @@ describe("PeriodCloseService", () => {
       expect(found).toBeUndefined();
     });
   });
+
 });
