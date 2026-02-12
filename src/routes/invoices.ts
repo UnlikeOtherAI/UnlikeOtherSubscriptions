@@ -7,6 +7,7 @@ import {
   TeamNotFoundError,
   BillingEntityNotFoundError,
 } from "../services/invoice.service.js";
+import { AuditLogService } from "../services/audit-log.service.js";
 
 const invoiceIdParamSchema = z.object({
   id: z.string().uuid(),
@@ -20,6 +21,7 @@ const generateBodySchema = z.object({
 
 export async function invoiceRoutes(app: FastifyInstance): Promise<void> {
   const invoiceService = new InvoiceService();
+  const auditLogService = new AuditLogService();
 
   app.post("/v1/invoices/generate", async (request, reply) => {
     const body = generateBodySchema.parse(request.body);
@@ -35,6 +37,19 @@ export async function invoiceRoutes(app: FastifyInstance): Promise<void> {
         { invoiceId: result.id, teamId: body.teamId },
         "Invoice generated",
       );
+
+      await auditLogService.log({
+        action: "invoice.generate",
+        entityType: "Invoice",
+        entityId: result.id,
+        actor: "admin",
+        metadata: {
+          teamId: body.teamId,
+          periodStart: body.periodStart,
+          periodEnd: body.periodEnd,
+          requestId: request.requestId,
+        },
+      });
 
       return reply.status(201).send(result);
     } catch (err) {
@@ -64,6 +79,14 @@ export async function invoiceRoutes(app: FastifyInstance): Promise<void> {
     try {
       const invoice = await invoiceService.getById(params.id);
 
+      await auditLogService.log({
+        action: "invoice.view",
+        entityType: "Invoice",
+        entityId: params.id,
+        actor: "admin",
+        metadata: { requestId: request.requestId },
+      });
+
       return reply.status(200).send(invoice);
     } catch (err) {
       if (err instanceof InvoiceNotFoundError) {
@@ -83,6 +106,14 @@ export async function invoiceRoutes(app: FastifyInstance): Promise<void> {
 
     try {
       const exported = await invoiceService.export(params.id);
+
+      await auditLogService.log({
+        action: "invoice.export",
+        entityType: "Invoice",
+        entityId: params.id,
+        actor: "admin",
+        metadata: { requestId: request.requestId },
+      });
 
       return reply.status(200).send(exported);
     } catch (err) {
@@ -108,6 +139,17 @@ export async function invoiceRoutes(app: FastifyInstance): Promise<void> {
         { invoiceId: params.id, status: result.status },
         "Invoice marked as paid",
       );
+
+      await auditLogService.log({
+        action: "invoice.mark-paid",
+        entityType: "Invoice",
+        entityId: params.id,
+        actor: "admin",
+        metadata: {
+          status: result.status,
+          requestId: request.requestId,
+        },
+      });
 
       return reply.status(200).send(result);
     } catch (err) {

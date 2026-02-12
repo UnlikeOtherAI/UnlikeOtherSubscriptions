@@ -1,14 +1,29 @@
 import { PrismaClient, Prisma } from "@prisma/client";
 import { getPrismaClient } from "../lib/prisma.js";
-import {
-  LedgerService,
-  DuplicateLedgerEntryError,
-} from "./ledger.service.js";
+import { LedgerService } from "./ledger.service.js";
 import {
   buildLineItems,
   ContractWithRelations,
   UsageAggregation,
 } from "./invoice-line-items.js";
+
+function isPrismaUniqueError(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    "code" in err &&
+    (err as { code: string }).code === "P2002"
+  );
+}
+
+function hashToInt32(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    const char = value.charCodeAt(i);
+    hash = ((hash << 5) - hash + char) | 0;
+  }
+  return hash;
+}
 
 export class InvoiceNotFoundError extends Error {
   constructor(invoiceId: string) {
@@ -281,46 +296,69 @@ export class InvoiceService {
       throw new InvalidInvoiceStatusError(invoiceId, invoice.status);
     }
 
-    const updated = await this.prisma.invoice.update({
-      where: { id: invoiceId },
-      data: { status: "PAID" },
-    });
-
-    // Create INVOICE_PAYMENT ledger entry
-    const idempotencyKey = `invoice-payment:${invoiceId}`;
-
     // Determine appId: use first line item's appId, or fallback to "system"
     const firstLineItem = await this.prisma.invoiceLineItem.findFirst({
       where: { invoiceId },
     });
     const appId = firstLineItem?.appId ?? "system";
 
-    try {
-      await this.ledgerService.createEntry({
-        appId,
-        billToId: invoice.billToId,
-        accountType: "ACCOUNTS_RECEIVABLE",
-        type: "INVOICE_PAYMENT",
-        amountMinor: -invoice.totalMinor,
-        currency: "USD",
-        referenceType: "MANUAL",
-        referenceId: invoiceId,
-        idempotencyKey,
-        metadata: {
-          invoiceId,
-          action: "mark-paid",
-          totalMinor: invoice.totalMinor,
-        },
-      });
-    } catch (err) {
-      if (err instanceof DuplicateLedgerEntryError) {
-        // Already recorded - idempotent
-      } else {
-        throw err;
-      }
-    }
+    const idempotencyKey = `invoice-payment:${invoiceId}`;
 
-    return { id: updated.id, status: updated.status };
+    // Get or create ledger account outside the transaction
+    const ledgerAccountId = await this.ledgerService.getOrCreateAccount(
+      appId,
+      invoice.billToId,
+      "ACCOUNTS_RECEIVABLE",
+    );
+
+    // Atomic transaction: update invoice status + create ledger entry together
+    // If either fails, both roll back
+    const lockKey = hashToInt32(invoice.billToId);
+
+    try {
+      const updated = await this.prisma.$transaction(async (tx) => {
+        // Advisory lock to serialize balance-affecting writes per billToId
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock($1)`,
+          lockKey,
+        );
+
+        const inv = await tx.invoice.update({
+          where: { id: invoiceId },
+          data: { status: "PAID" },
+        });
+
+        await tx.ledgerEntry.create({
+          data: {
+            appId,
+            billToId: invoice.billToId,
+            ledgerAccountId,
+            type: "INVOICE_PAYMENT",
+            amountMinor: -invoice.totalMinor,
+            currency: "USD",
+            referenceType: "MANUAL",
+            referenceId: invoiceId,
+            idempotencyKey,
+            metadata: {
+              invoiceId,
+              action: "mark-paid",
+              totalMinor: invoice.totalMinor,
+            } as Prisma.InputJsonValue,
+          },
+        });
+
+        return inv;
+      });
+
+      return { id: updated.id, status: updated.status };
+    } catch (err) {
+      if (isPrismaUniqueError(err)) {
+        // Duplicate ledger entry means this was already processed (idempotent)
+        // The invoice is already PAID from the previous successful transaction
+        return { id: invoiceId, status: "PAID" };
+      }
+      throw err;
+    }
   }
 
   private async aggregateUsage(

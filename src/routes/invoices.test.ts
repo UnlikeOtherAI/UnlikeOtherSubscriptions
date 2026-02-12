@@ -24,6 +24,7 @@ const { mockPrisma } = vi.hoisted(() => ({
     billableLineItem: { findMany: vi.fn() },
     ledgerAccount: { findUnique: vi.fn(), create: vi.fn() },
     ledgerEntry: { create: vi.fn() },
+    auditLog: { create: vi.fn() },
     appSecret: { findUnique: vi.fn() },
     jtiUsage: { create: vi.fn() },
     $transaction: vi.fn(),
@@ -48,6 +49,7 @@ function setupMocks() {
   mockPrisma.$transaction.mockImplementation(async (fn: Function) => {
     return fn(mockPrisma);
   });
+  mockPrisma.auditLog.create.mockResolvedValue({ id: uuidv4() });
 }
 
 describe("POST /v1/invoices/generate", () => {
@@ -126,6 +128,51 @@ describe("POST /v1/invoices/generate", () => {
     expect(body.subtotalMinor).toBe(8000);
     expect(body.totalMinor).toBe(8000);
     expect(body.lineItemCount).toBe(1);
+  });
+
+  it("creates audit log entry on successful generation", async () => {
+    mockPrisma.team.findUnique.mockResolvedValue({
+      id: TEST_TEAM_ID,
+      billingEntity: { id: BILLING_ENTITY_ID },
+    });
+
+    mockPrisma.invoice.findFirst.mockResolvedValue(null);
+    mockPrisma.billableLineItem.findMany.mockResolvedValue([]);
+
+    const invoiceId = uuidv4();
+    mockPrisma.invoice.create.mockResolvedValue({
+      id: invoiceId,
+      billToId: BILLING_ENTITY_ID,
+      contractId: null,
+      periodStart: new Date("2025-01-01T00:00:00.000Z"),
+      periodEnd: new Date("2025-02-01T00:00:00.000Z"),
+      status: "ISSUED",
+      subtotalMinor: 0,
+      taxMinor: 0,
+      totalMinor: 0,
+      issuedAt: new Date(),
+    });
+
+    mockPrisma.invoiceLineItem.create.mockResolvedValue({});
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/invoices/generate",
+      headers: adminHeaders(),
+      payload: {
+        teamId: TEST_TEAM_ID,
+        periodStart: "2025-01-01T00:00:00.000Z",
+        periodEnd: "2025-02-01T00:00:00.000Z",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(mockPrisma.auditLog.create).toHaveBeenCalledTimes(1);
+    const auditCall = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(auditCall.data.action).toBe("invoice.generate");
+    expect(auditCall.data.entityType).toBe("Invoice");
+    expect(auditCall.data.entityId).toBe(invoiceId);
+    expect(auditCall.data.actor).toBe("admin");
   });
 
   it("returns 404 for nonexistent team", async () => {
@@ -290,6 +337,42 @@ describe("GET /v1/invoices/:id", () => {
     expect(body.lineItems).toHaveLength(1);
     expect(body.lineItems[0].type).toBe("USAGE_TRUEUP");
     expect(body.lineItems[0].amountMinor).toBe(5000);
+  });
+
+  it("creates audit log entry on successful view", async () => {
+    const invoiceId = uuidv4();
+
+    mockPrisma.invoice.findUnique.mockResolvedValue({
+      id: invoiceId,
+      billToId: BILLING_ENTITY_ID,
+      contractId: null,
+      periodStart: new Date("2025-01-01T00:00:00.000Z"),
+      periodEnd: new Date("2025-02-01T00:00:00.000Z"),
+      status: "ISSUED",
+      subtotalMinor: 5000,
+      taxMinor: 0,
+      totalMinor: 5000,
+      externalRef: null,
+      issuedAt: new Date(),
+      dueAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lineItems: [],
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/v1/invoices/${invoiceId}`,
+      headers: adminHeaders(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockPrisma.auditLog.create).toHaveBeenCalledTimes(1);
+    const auditCall = mockPrisma.auditLog.create.mock.calls[0][0];
+    expect(auditCall.data.action).toBe("invoice.view");
+    expect(auditCall.data.entityType).toBe("Invoice");
+    expect(auditCall.data.entityId).toBe(invoiceId);
+    expect(auditCall.data.actor).toBe("admin");
   });
 
   it("returns 404 for nonexistent invoice", async () => {
