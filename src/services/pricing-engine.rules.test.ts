@@ -10,8 +10,6 @@ import {
 } from "./test-db-helper.js";
 import {
   PricingEngine,
-  NoPriceBookFoundError,
-  NoMatchingRuleError,
   InvalidRuleError,
 } from "./pricing-engine.service.js";
 
@@ -88,7 +86,7 @@ function makeUsageEvent(
   };
 }
 
-describe("PricingEngine", () => {
+describe("PricingEngine — rule evaluation", () => {
   describe("flat rule", () => {
     it("produces correct amount for a flat rule", async () => {
       const { app, team, be } = await createTestSetup(prisma);
@@ -335,43 +333,6 @@ describe("PricingEngine", () => {
     });
   });
 
-  describe("COGS and CUSTOMER line items", () => {
-    it("produces exactly two line items per event", async () => {
-      const { app, team, be } = await createTestSetup(prisma);
-      const { cogs, customer } = await createPriceBooks(prisma, app.id);
-
-      await prisma.priceRule.create({
-        data: {
-          priceBookId: cogs.id,
-          priority: 10,
-          match: { eventType: "llm.tokens.v1" },
-          rule: { type: "flat", amount: 25 },
-        },
-      });
-
-      await prisma.priceRule.create({
-        data: {
-          priceBookId: customer.id,
-          priority: 10,
-          match: { eventType: "llm.tokens.v1" },
-          rule: { type: "flat", amount: 75 },
-        },
-      });
-
-      const event = makeUsageEvent(app.id, team.id, be.id, {
-        provider: "openai",
-        inputTokens: 500,
-        outputTokens: 100,
-      });
-
-      const result = await engine.priceEvent(event);
-
-      expect(result.lineItems).toHaveLength(2);
-      expect(result.lineItems[0].priceBookId).toBe(cogs.id);
-      expect(result.lineItems[1].priceBookId).toBe(customer.id);
-    });
-  });
-
   describe("inputsSnapshot", () => {
     it("captures computation inputs for reproducibility", async () => {
       const { app, team, be } = await createTestSetup(prisma);
@@ -414,61 +375,7 @@ describe("PricingEngine", () => {
     });
   });
 
-  describe("error cases", () => {
-    it("throws NoPriceBookFoundError when no COGS book exists", async () => {
-      const { app, team, be } = await createTestSetup(prisma);
-
-      // Only create CUSTOMER book, no COGS
-      await prisma.priceBook.create({
-        data: {
-          appId: app.id,
-          kind: "CUSTOMER",
-          currency: "USD",
-          effectiveFrom: new Date("2025-01-01T00:00:00Z"),
-        },
-      });
-
-      const event = makeUsageEvent(app.id, team.id, be.id, {
-        inputTokens: 100,
-      });
-
-      await expect(engine.priceEvent(event)).rejects.toThrow(
-        NoPriceBookFoundError,
-      );
-    });
-
-    it("throws NoMatchingRuleError when no rule matches", async () => {
-      const { app, team, be } = await createTestSetup(prisma);
-      const { cogs, customer } = await createPriceBooks(prisma, app.id);
-
-      // Rules only match llm.image.v1, but event is llm.tokens.v1
-      await prisma.priceRule.create({
-        data: {
-          priceBookId: cogs.id,
-          priority: 10,
-          match: { eventType: "llm.image.v1" },
-          rule: { type: "flat", amount: 50 },
-        },
-      });
-
-      await prisma.priceRule.create({
-        data: {
-          priceBookId: customer.id,
-          priority: 10,
-          match: { eventType: "llm.image.v1" },
-          rule: { type: "flat", amount: 100 },
-        },
-      });
-
-      const event = makeUsageEvent(app.id, team.id, be.id, {
-        inputTokens: 100,
-      });
-
-      await expect(engine.priceEvent(event)).rejects.toThrow(
-        NoMatchingRuleError,
-      );
-    });
-
+  describe("error cases — evaluateRule", () => {
     it("throws InvalidRuleError for unsupported rule type", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const invalidRule = { type: "unknown_type" } as any;
@@ -485,124 +392,6 @@ describe("PricingEngine", () => {
           { inputTokens: 100 },
         ),
       ).toThrow(InvalidRuleError);
-    });
-  });
-
-  describe("persistLineItems", () => {
-    it("persists line items to the database", async () => {
-      const { app, team, be } = await createTestSetup(prisma);
-      const { cogs, customer } = await createPriceBooks(prisma, app.id);
-
-      const cogsRule = await prisma.priceRule.create({
-        data: {
-          priceBookId: cogs.id,
-          priority: 10,
-          match: { eventType: "llm.tokens.v1" },
-          rule: { type: "flat", amount: 25 },
-        },
-      });
-
-      const customerRule = await prisma.priceRule.create({
-        data: {
-          priceBookId: customer.id,
-          priority: 10,
-          match: { eventType: "llm.tokens.v1" },
-          rule: { type: "flat", amount: 75 },
-        },
-      });
-
-      const event = makeUsageEvent(app.id, team.id, be.id, {
-        provider: "openai",
-        inputTokens: 500,
-      });
-
-      const result = await engine.priceEvent(event);
-      const ids = await engine.persistLineItems(result);
-
-      expect(ids).toHaveLength(2);
-
-      const items = await prisma.billableLineItem.findMany({
-        where: { id: { in: ids } },
-        orderBy: { createdAt: "asc" },
-      });
-
-      expect(items).toHaveLength(2);
-      expect(items[0].appId).toBe(app.id);
-      expect(items[0].billToId).toBe(be.id);
-      expect(items[0].teamId).toBe(team.id);
-      expect(items[0].usageEventId).toBe(event.id);
-    });
-  });
-
-  describe("effective date filtering", () => {
-    it("selects price book effective at event timestamp", async () => {
-      const { app, team, be } = await createTestSetup(prisma);
-
-      // Old price books (expired)
-      const oldCogs = await prisma.priceBook.create({
-        data: {
-          appId: app.id,
-          kind: "COGS",
-          currency: "USD",
-          version: 1,
-          effectiveFrom: new Date("2024-01-01T00:00:00Z"),
-          effectiveTo: new Date("2025-01-01T00:00:00Z"),
-        },
-      });
-
-      // Current price books
-      const currentCogs = await prisma.priceBook.create({
-        data: {
-          appId: app.id,
-          kind: "COGS",
-          currency: "USD",
-          version: 2,
-          effectiveFrom: new Date("2025-01-01T00:00:00Z"),
-        },
-      });
-
-      const currentCustomer = await prisma.priceBook.create({
-        data: {
-          appId: app.id,
-          kind: "CUSTOMER",
-          currency: "USD",
-          version: 2,
-          effectiveFrom: new Date("2025-01-01T00:00:00Z"),
-        },
-      });
-
-      await prisma.priceRule.create({
-        data: {
-          priceBookId: currentCogs.id,
-          priority: 10,
-          match: { eventType: "llm.tokens.v1" },
-          rule: { type: "flat", amount: 77 },
-        },
-      });
-
-      await prisma.priceRule.create({
-        data: {
-          priceBookId: currentCustomer.id,
-          priority: 10,
-          match: { eventType: "llm.tokens.v1" },
-          rule: { type: "flat", amount: 150 },
-        },
-      });
-
-      const event = makeUsageEvent(
-        app.id,
-        team.id,
-        be.id,
-        { inputTokens: 100 },
-        { timestamp: new Date("2025-06-15T12:00:00Z") },
-      );
-
-      const result = await engine.priceEvent(event);
-
-      expect(result.lineItems[0].priceBookId).toBe(currentCogs.id);
-      expect(result.lineItems[0].amountMinor).toBe(77);
-      expect(result.lineItems[1].priceBookId).toBe(currentCustomer.id);
-      expect(result.lineItems[1].amountMinor).toBe(150);
     });
   });
 });
