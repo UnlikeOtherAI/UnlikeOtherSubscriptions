@@ -58,6 +58,39 @@ export async function createTestTeam(
   });
 }
 
+/**
+ * Creates a BillingEntity record to serve as FK target for Contract.
+ * Optionally links to a Team.
+ */
+export async function createTestBillingEntity(
+  prisma: PrismaClient,
+  overrides: { id?: string; teamId?: string } = {},
+): Promise<{ id: string }> {
+  return prisma.billingEntity.create({
+    data: {
+      id: overrides.id ?? `be-${randomSuffix()}`,
+      type: "TEAM",
+      teamId: overrides.teamId ?? undefined,
+    },
+  });
+}
+
+/**
+ * Creates a Bundle record to serve as FK target for Contract/BundleApp/BundleMeterPolicy.
+ */
+export async function createTestBundle(
+  prisma: PrismaClient,
+  overrides: { id?: string; code?: string; name?: string } = {},
+): Promise<{ id: string; code: string; name: string }> {
+  return prisma.bundle.create({
+    data: {
+      id: overrides.id ?? `bundle-${randomSuffix()}`,
+      code: overrides.code ?? `bundle-code-${randomSuffix()}`,
+      name: overrides.name ?? "Test Bundle",
+    },
+  });
+}
+
 export function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 10);
 }
