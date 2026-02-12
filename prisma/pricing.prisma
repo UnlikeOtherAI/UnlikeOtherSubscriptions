@@ -44,7 +44,7 @@ model PriceRule {
 // ─── Billable Line Items (Immutable) ────────────────────────────────────────
 
 model BillableLineItem {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   appId           String
   billToId        String
   teamId          String
@@ -57,6 +57,7 @@ model BillableLineItem {
   currency        String
   description     String
   inputsSnapshot  Json
+  walletDebitedAt DateTime?
 
   createdAt DateTime @default(now())
 
@@ -67,4 +68,5 @@ model BillableLineItem {
 
   @@index([appId, teamId, timestamp])
   @@index([billToId, timestamp])
+  @@index([teamId, walletDebitedAt])
 }
