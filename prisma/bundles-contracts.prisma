@@ -112,6 +112,7 @@ model Contract {
   bundle        Bundle        @relation(fields: [bundleId], references: [id])
   overrides     ContractOverride[]
   rateCards     ContractRateCard[]
+  invoices      Invoice[]
 
   // Unique partial index: at most one ACTIVE contract per billing entity
   // Prisma doesn't natively support partial unique indexes, so we use raw SQL

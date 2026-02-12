@@ -1,0 +1,59 @@
+// ─── Invoicing ──────────────────────────────────────────────────────────────
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  VOID
+}
+
+enum InvoiceLineItemType {
+  BASE_FEE
+  USAGE_TRUEUP
+  ADDON
+  CREDIT
+  ADJUSTMENT
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  billToId      String
+  contractId    String?
+  periodStart   DateTime
+  periodEnd     DateTime
+  status        InvoiceStatus @default(DRAFT)
+  subtotalMinor Int
+  taxMinor      Int
+  totalMinor    Int
+  externalRef   String?
+  issuedAt      DateTime?
+  dueAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  billingEntity BillingEntity    @relation(fields: [billToId], references: [id])
+  contract      Contract?        @relation(fields: [contractId], references: [id])
+  lineItems     InvoiceLineItem[]
+
+  @@index([billToId, periodStart, periodEnd])
+  @@index([contractId])
+}
+
+model InvoiceLineItem {
+  id             String              @id @default(uuid())
+  invoiceId      String
+  appId          String?
+  type           InvoiceLineItemType
+  description    String
+  quantity       Int
+  unitPriceMinor Int
+  amountMinor    Int
+  usageSummary   Json?
+
+  createdAt DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+}

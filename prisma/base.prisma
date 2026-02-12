@@ -138,6 +138,7 @@ model BillingEntity {
   usageEvents       UsageEvent[]
   contracts         Contract[]
   billableLineItems BillableLineItem[]
+  invoices          Invoice[]
 }
 
 model ExternalTeamRef {
