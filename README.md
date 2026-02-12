@@ -91,14 +91,17 @@ npx prisma validate
 # Generate Prisma Client
 npx prisma generate
 
-# Run database migrations
-npx prisma migrate dev
+# Apply database migrations (production / CI)
+npx prisma migrate deploy
+
+# Create a new migration during development
+npx prisma migrate dev --name <migration_name>
 
 # Start the service
 npm run dev
 ```
 
-> **Note:** The Prisma schema is split into modules under `prisma/schema/` for maintainability. Schema and migration paths are configured in `prisma.config.ts`, so all `npx prisma` commands work from the project root without extra flags.
+> **Note:** The Prisma schema is split into modules under `prisma/` for maintainability (e.g. `base.prisma`, `subscriptions.prisma`). Migrations live in `prisma/migrations/`. The `prisma.config.ts` file configures the schema directory so all `npx prisma` commands work from the project root without extra flags.
 
 ## Releases
 
