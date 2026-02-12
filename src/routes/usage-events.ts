@@ -8,6 +8,8 @@ import {
   UserNotFoundError,
   PersonalTeamNotFoundError,
   BillingEntityNotFoundError,
+  UnknownEventTypeError,
+  PayloadValidationFailedError,
   MAX_BATCH_SIZE,
 } from "../services/usage-event.service.js";
 
@@ -67,6 +69,25 @@ export async function usageEventRoutes(app: FastifyInstance): Promise<void> {
           message: "App not found",
           statusCode: 404,
           requestId: request.requestId,
+        });
+      }
+      if (err instanceof UnknownEventTypeError) {
+        return reply.status(400).send({
+          error: "Bad Request",
+          message: err.message,
+          statusCode: 400,
+          requestId: request.requestId,
+          eventType: err.eventType,
+        });
+      }
+      if (err instanceof PayloadValidationFailedError) {
+        return reply.status(400).send({
+          error: "Bad Request",
+          message: err.message,
+          statusCode: 400,
+          requestId: request.requestId,
+          eventType: err.eventType,
+          validationErrors: err.validationErrors,
         });
       }
       if (err instanceof BatchTooLargeError) {

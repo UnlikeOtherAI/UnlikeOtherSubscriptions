@@ -1,5 +1,13 @@
 import { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../lib/prisma.js";
+import {
+  validateEventPayload,
+  isRegisteredEventType,
+  UnknownEventTypeError,
+  PayloadValidationFailedError,
+} from "./usage-event-schema-registry.js";
+
+export { UnknownEventTypeError, PayloadValidationFailedError } from "./usage-event-schema-registry.js";
 
 export const MAX_BATCH_SIZE = 1000;
 
@@ -41,6 +49,17 @@ export class UsageEventService {
     let duplicates = 0;
 
     for (const event of input.events) {
+      // Validate eventType is registered
+      if (!isRegisteredEventType(event.eventType)) {
+        throw new UnknownEventTypeError(event.eventType);
+      }
+
+      // Validate payload against schema
+      const validation = validateEventPayload(event.eventType, event.payload);
+      if (!validation.valid) {
+        throw new PayloadValidationFailedError(event.eventType, validation.errors);
+      }
+
       const teamId = await this.resolveTeamId(prisma, input.appId, event);
       const billToId = await this.resolveBillToId(prisma, teamId);
 

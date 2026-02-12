@@ -282,16 +282,18 @@ describe("POST /v1/apps/:appId/usage/events — ingestion", () => {
     expect(body.duplicates).toBe(1);
   });
 
-  it("accepts valid eventType formats", async () => {
-    const validTypes = [
-      "llm.tokens.v1", "llm.image.v1", "storage.sample.v1",
-      "bandwidth.sample.v1", "custom.deep.nested.event.v2",
+  it("accepts all registered V1 eventType formats with valid payloads", async () => {
+    const typesAndPayloads: Array<{ eventType: string; payload: Record<string, unknown> }> = [
+      { eventType: "llm.tokens.v1", payload: { provider: "openai", model: "gpt-5", inputTokens: 100, outputTokens: 50 } },
+      { eventType: "llm.image.v1", payload: { provider: "openai", model: "dall-e-3", width: 1024, height: 1024, count: 1 } },
+      { eventType: "storage.sample.v1", payload: { bytesUsed: 1048576 } },
+      { eventType: "bandwidth.sample.v1", payload: { bytesIn: 5000, bytesOut: 12000 } },
     ];
-    for (const eventType of validTypes) {
+    for (const { eventType, payload } of typesAndPayloads) {
       const response = await app.inject({
         method: "POST",
         url: `/v1/apps/${TEST_APP_ID}/usage/events`,
-        payload: [makeEvent({ eventType })],
+        payload: [makeEvent({ eventType, payload })],
         headers: authHeaders(),
       });
       expect(response.statusCode).toBe(200);
