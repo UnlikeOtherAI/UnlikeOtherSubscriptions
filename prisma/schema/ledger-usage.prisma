@@ -1,0 +1,97 @@
+// ─── Ledger ────────────────────────────────────────────────────────────────
+
+enum LedgerAccountType {
+  WALLET
+  ACCOUNTS_RECEIVABLE
+  REVENUE
+  COGS
+  TAX
+}
+
+enum LedgerEntryType {
+  TOPUP
+  SUBSCRIPTION_CHARGE
+  USAGE_CHARGE
+  REFUND
+  ADJUSTMENT
+  INVOICE_PAYMENT
+  COGS_ACCRUAL
+}
+
+enum LedgerReferenceType {
+  STRIPE_INVOICE
+  STRIPE_PAYMENT_INTENT
+  USAGE_EVENT
+  MANUAL
+}
+
+model LedgerAccount {
+  id       String            @id @default(uuid())
+  appId    String
+  billToId String
+  type     LedgerAccountType
+
+  createdAt DateTime @default(now())
+
+  billingEntity BillingEntity @relation(fields: [billToId], references: [id])
+  entries       LedgerEntry[]
+
+  @@unique([appId, billToId, type])
+}
+
+model LedgerEntry {
+  id              String              @id @default(uuid())
+  appId           String
+  billToId        String
+  ledgerAccountId String
+  timestamp       DateTime            @default(now())
+  type            LedgerEntryType
+  amountMinor     Int
+  currency        String
+  referenceType   LedgerReferenceType
+  referenceId     String?
+  idempotencyKey  String              @unique
+  metadata        Json?
+
+  createdAt DateTime @default(now())
+
+  billingEntity BillingEntity @relation(fields: [billToId], references: [id])
+  ledgerAccount LedgerAccount @relation(fields: [ledgerAccountId], references: [id])
+
+  @@index([billToId, timestamp])
+  @@index([ledgerAccountId, timestamp])
+}
+
+// ─── Usage Events (Immutable) ─────────────────────────────────────────────
+
+model UsageEvent {
+  id             String   @id @default(uuid())
+  appId          String
+  teamId         String
+  billToId       String
+  userId         String?
+  eventType      String
+  timestamp      DateTime
+  idempotencyKey String
+  payload        Json
+  source         String
+
+  createdAt DateTime @default(now())
+
+  billingEntity BillingEntity @relation(fields: [billToId], references: [id])
+
+  @@unique([appId, idempotencyKey])
+  @@index([appId, teamId, timestamp])
+  @@index([billToId, timestamp])
+}
+
+// ─── Stripe Webhooks ────────────────────────────────────────────────────────
+
+model StripeWebhookEvent {
+  id          String   @id @default(uuid())
+  eventId     String   @unique
+  eventType   String
+  processedAt DateTime @default(now())
+
+  @@index([processedAt])
+}

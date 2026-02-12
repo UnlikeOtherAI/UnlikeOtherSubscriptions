@@ -1,0 +1,173 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = []
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Core Enums ─────────────────────────────────────────────────────────────
+
+enum TeamKind {
+  PERSONAL
+  STANDARD
+  ENTERPRISE
+}
+
+enum BillingMode {
+  SUBSCRIPTION
+  WALLET
+  HYBRID
+  ENTERPRISE_CONTRACT
+}
+
+enum TeamMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum TeamMemberStatus {
+  ACTIVE
+  REMOVED
+}
+
+enum BillingEntityType {
+  TEAM
+  ORG
+}
+
+enum AppSecretStatus {
+  ACTIVE
+  REVOKED
+}
+
+// ─── Core Identity Models ───────────────────────────────────────────────────
+
+model App {
+  id     String @id @default(uuid())
+  name   String
+  status String @default("ACTIVE")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users             User[]
+  secrets           AppSecret[]
+  externalTeamRefs  ExternalTeamRef[]
+  plans             Plan[]
+  addons            Addon[]
+  bundleApps        BundleApp[]
+  bundleMeterPolicies BundleMeterPolicy[]
+  contractOverrides ContractOverride[]
+}
+
+model Team {
+  id               String      @id @default(uuid())
+  name             String
+  kind             TeamKind
+  ownerUserId      String?
+  defaultCurrency  String      @default("USD")
+  stripeCustomerId String?
+  billingMode      BillingMode @default(SUBSCRIPTION)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner         User?              @relation("PersonalTeamOwner", fields: [ownerUserId], references: [id])
+  members       TeamMember[]
+  billingEntity BillingEntity?
+  externalRefs  ExternalTeamRef[]
+  subscriptions TeamSubscription[]
+  teamAddons    TeamAddon[]
+
+  // Unique partial index: one Personal Team per user
+  // Prisma doesn't natively support partial unique indexes, so we use raw SQL
+  @@index([ownerUserId])
+}
+
+model User {
+  id          String @id @default(uuid())
+  appId       String
+  email       String
+  externalRef String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  app           App          @relation(fields: [appId], references: [id])
+  memberships   TeamMember[]
+  personalTeams Team[]       @relation("PersonalTeamOwner")
+
+  @@unique([appId, externalRef])
+  @@index([appId, email])
+}
+
+model TeamMember {
+  id        String           @id @default(uuid())
+  teamId    String
+  userId    String
+  role      TeamMemberRole   @default(MEMBER)
+  status    TeamMemberStatus @default(ACTIVE)
+  startedAt DateTime         @default(now())
+  endedAt   DateTime?
+
+  team Team @relation(fields: [teamId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([teamId, userId])
+  @@index([teamId, status])
+}
+
+model BillingEntity {
+  id     String            @id @default(uuid())
+  type   BillingEntityType @default(TEAM)
+  teamId String?           @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  team           Team?          @relation(fields: [teamId], references: [id])
+  ledgerAccounts LedgerAccount[]
+  ledgerEntries  LedgerEntry[]
+  usageEvents    UsageEvent[]
+  contracts      Contract[]
+}
+
+model ExternalTeamRef {
+  id             String @id @default(uuid())
+  appId          String
+  externalTeamId String
+  billingTeamId  String
+
+  createdAt DateTime @default(now())
+
+  app         App  @relation(fields: [appId], references: [id])
+  billingTeam Team @relation(fields: [billingTeamId], references: [id])
+
+  @@unique([appId, externalTeamId])
+  @@index([billingTeamId])
+}
+
+model AppSecret {
+  id         String          @id @default(uuid())
+  appId      String
+  kid        String          @unique
+  secretHash String
+  status     AppSecretStatus @default(ACTIVE)
+  createdAt  DateTime        @default(now())
+  revokedAt  DateTime?
+
+  app App @relation(fields: [appId], references: [id])
+
+  @@index([appId, status])
+}
+
+model JtiUsage {
+  jti       String   @id
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}

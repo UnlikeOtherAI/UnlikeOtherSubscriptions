@@ -1,0 +1,155 @@
+// ─── Bundles & Enterprise Contracts ──────────────────────────────────────────
+
+enum MeterLimitType {
+  NONE
+  INCLUDED
+  UNLIMITED
+  HARD_CAP
+}
+
+enum MeterEnforcement {
+  NONE
+  SOFT
+  HARD
+}
+
+enum OverageBilling {
+  NONE
+  PER_UNIT
+  TIERED
+  CUSTOM
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum BillingPeriod {
+  MONTHLY
+  QUARTERLY
+}
+
+enum PricingMode {
+  FIXED
+  FIXED_PLUS_TRUEUP
+  MIN_COMMIT_TRUEUP
+  CUSTOM_INVOICE_ONLY
+}
+
+enum ContractRateCardKind {
+  CUSTOMER
+  COGS
+}
+
+model Bundle {
+  id     String @id @default(uuid())
+  code   String @unique
+  name   String
+  status String @default("ACTIVE")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  apps          BundleApp[]
+  meterPolicies BundleMeterPolicy[]
+  contracts     Contract[]
+}
+
+model BundleApp {
+  id                  String @id @default(uuid())
+  bundleId            String
+  appId               String
+  defaultFeatureFlags Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bundle Bundle @relation(fields: [bundleId], references: [id])
+  app    App    @relation(fields: [appId], references: [id])
+
+  @@unique([bundleId, appId])
+}
+
+model BundleMeterPolicy {
+  id             String           @id @default(uuid())
+  bundleId       String
+  appId          String
+  meterKey       String
+  limitType      MeterLimitType
+  includedAmount Int?
+  enforcement    MeterEnforcement @default(NONE)
+  overageBilling OverageBilling   @default(NONE)
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bundle Bundle @relation(fields: [bundleId], references: [id])
+  app    App    @relation(fields: [appId], references: [id])
+
+  @@unique([bundleId, appId, meterKey])
+}
+
+model Contract {
+  id            String         @id @default(uuid())
+  billToId      String
+  status        ContractStatus @default(DRAFT)
+  bundleId      String
+  currency      String
+  billingPeriod BillingPeriod
+  termsDays     Int
+  startsAt      DateTime
+  endsAt        DateTime?
+  pricingMode   PricingMode
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  billingEntity BillingEntity @relation(fields: [billToId], references: [id])
+  bundle        Bundle        @relation(fields: [bundleId], references: [id])
+  overrides     ContractOverride[]
+  rateCards     ContractRateCard[]
+
+  // Unique partial index: at most one ACTIVE contract per billing entity
+  // Prisma doesn't natively support partial unique indexes, so we use raw SQL
+  @@index([billToId])
+  @@index([bundleId])
+}
+
+model ContractOverride {
+  id             String            @id @default(uuid())
+  contractId     String
+  appId          String
+  meterKey       String
+  limitType      MeterLimitType?
+  includedAmount Int?
+  overageBilling OverageBilling?
+  enforcement    MeterEnforcement?
+  featureFlags   Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contract Contract @relation(fields: [contractId], references: [id])
+  app      App      @relation(fields: [appId], references: [id])
+
+  @@unique([contractId, appId, meterKey])
+}
+
+model ContractRateCard {
+  id            String               @id @default(uuid())
+  contractId    String
+  kind          ContractRateCardKind
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contract Contract @relation(fields: [contractId], references: [id])
+
+  @@index([contractId])
+}
