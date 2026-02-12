@@ -9,6 +9,7 @@ const ADMIN_PROTECTED_PREFIXES = ["/v1/admin/"];
 const ADMIN_PROTECTED_EXACT_PREFIXES = [
   "/v1/contracts",
   "/v1/bundles",
+  "/v1/invoices",
 ];
 
 export function isAdminRoute(url: string, routePath?: string): boolean {
