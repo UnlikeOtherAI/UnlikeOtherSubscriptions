@@ -1,0 +1,23 @@
+{
+  "name": "@unlikeotherai/billing-sdk",
+  "version": "1.0.0",
+  "description": "TypeScript SDK for the UnlikeOtherSubscriptions billing service",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "PROPRIETARY"
+}
