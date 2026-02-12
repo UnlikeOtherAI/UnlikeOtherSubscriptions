@@ -12,10 +12,13 @@ import {
 export const PRICING_WORKER_QUEUE = "pricing-engine";
 const DEFAULT_BATCH_SIZE = 50;
 const DEFAULT_POLL_INTERVAL_SECONDS = 5;
+const DEFAULT_MAX_RETRIES = 5;
+const BACKOFF_BASE_MS = 1000;
 
 export interface PricingWorkerOptions {
   batchSize?: number;
   pollingIntervalSeconds?: number;
+  maxRetries?: number;
 }
 
 export class PricingEngineWorker {
@@ -23,6 +26,7 @@ export class PricingEngineWorker {
   private engine: PricingEngine;
   private batchSize: number;
   private pollingIntervalSeconds: number;
+  private maxRetries: number;
 
   constructor(
     prisma?: PrismaClient,
@@ -34,6 +38,7 @@ export class PricingEngineWorker {
     this.batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
     this.pollingIntervalSeconds =
       options.pollingIntervalSeconds ?? DEFAULT_POLL_INTERVAL_SECONDS;
+    this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   }
 
   async start(boss?: PgBoss): Promise<void> {
@@ -60,8 +65,15 @@ export class PricingEngineWorker {
     skipped: number;
     failed: number;
   }> {
+    const now = new Date();
     const unpricedEvents = await this.prisma.usageEvent.findMany({
-      where: { pricedAt: null },
+      where: {
+        pricedAt: null,
+        OR: [
+          { nextRetryAt: null },
+          { nextRetryAt: { lte: now } },
+        ],
+      },
       orderBy: { createdAt: "asc" },
       take: this.batchSize,
     });
@@ -83,6 +95,7 @@ export class PricingEngineWorker {
           await this.flagFailedEvent(event, err as Error);
           failed++;
         } else {
+          await this.scheduleTransientRetry(event, err as Error);
           failed++;
         }
       }
@@ -143,6 +156,33 @@ export class PricingEngineWorker {
     return true;
   }
 
+  private async scheduleTransientRetry(
+    event: UsageEvent,
+    error: Error,
+  ): Promise<void> {
+    const nextRetryCount = event.retryCount + 1;
+
+    if (nextRetryCount > this.maxRetries) {
+      console.error(
+        `[pricing-worker] Max retries (${this.maxRetries}) exceeded for event ${event.id}: ${error.message}`,
+      );
+      await this.flagFailedEvent(event, error);
+      return;
+    }
+
+    const backoffMs = computeBackoffMs(nextRetryCount);
+    const nextRetryAt = new Date(Date.now() + backoffMs);
+
+    console.warn(
+      `[pricing-worker] Transient failure for event ${event.id} (retry ${nextRetryCount}/${this.maxRetries}), next retry at ${nextRetryAt.toISOString()}: ${error.message}`,
+    );
+
+    await this.prisma.usageEvent.update({
+      where: { id: event.id },
+      data: { retryCount: nextRetryCount, nextRetryAt },
+    });
+  }
+
   private isPermanentFailure(err: unknown): boolean {
     return (
       err instanceof NoPriceBookFoundError ||
@@ -164,4 +204,8 @@ export class PricingEngineWorker {
       data: { pricedAt: new Date() },
     });
   }
+}
+
+export function computeBackoffMs(retryCount: number): number {
+  return BACKOFF_BASE_MS * Math.pow(2, retryCount - 1);
 }

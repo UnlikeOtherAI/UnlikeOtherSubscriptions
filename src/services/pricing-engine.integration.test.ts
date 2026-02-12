@@ -84,6 +84,8 @@ function makeUsageEvent(
     payload: payload as unknown as Prisma.JsonValue,
     source: overrides.source ?? "test",
     pricedAt: overrides.pricedAt ?? null,
+    retryCount: overrides.retryCount ?? 0,
+    nextRetryAt: overrides.nextRetryAt ?? null,
     createdAt: overrides.createdAt ?? new Date(),
   };
 }

@@ -76,6 +76,8 @@ model UsageEvent {
   payload        Json
   source         String
   pricedAt       DateTime?
+  retryCount     Int       @default(0)
+  nextRetryAt    DateTime?
 
   createdAt DateTime @default(now())
 
