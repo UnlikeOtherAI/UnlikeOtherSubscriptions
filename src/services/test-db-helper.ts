@@ -47,6 +47,7 @@ export async function createTestTeam(
     id?: string;
     name?: string;
     kind?: "PERSONAL" | "STANDARD" | "ENTERPRISE";
+    billingMode?: "SUBSCRIPTION" | "WALLET" | "HYBRID" | "ENTERPRISE_CONTRACT";
   } = {},
 ): Promise<{ id: string; name: string }> {
   return prisma.team.create({
@@ -54,6 +55,7 @@ export async function createTestTeam(
       id: overrides.id ?? `team-${randomSuffix()}`,
       name: overrides.name ?? "Test Team",
       kind: overrides.kind ?? "STANDARD",
+      billingMode: overrides.billingMode ?? "SUBSCRIPTION",
     },
   });
 }

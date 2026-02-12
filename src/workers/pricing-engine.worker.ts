@@ -8,6 +8,7 @@ import {
   NoMatchingRuleError,
   InvalidRuleError,
 } from "../services/pricing-engine.service.js";
+import { WalletDebitService } from "../services/wallet-debit.service.js";
 
 export const PRICING_WORKER_QUEUE = "pricing-engine";
 const DEFAULT_BATCH_SIZE = 50;
@@ -24,6 +25,7 @@ export interface PricingWorkerOptions {
 export class PricingEngineWorker {
   private prisma: PrismaClient;
   private engine: PricingEngine;
+  private walletDebitService: WalletDebitService;
   private batchSize: number;
   private pollingIntervalSeconds: number;
   private maxRetries: number;
@@ -32,9 +34,12 @@ export class PricingEngineWorker {
     prisma?: PrismaClient,
     engine?: PricingEngine,
     options: PricingWorkerOptions = {},
+    walletDebitService?: WalletDebitService,
   ) {
     this.prisma = prisma ?? getPrismaClient();
     this.engine = engine ?? new PricingEngine(this.prisma);
+    this.walletDebitService =
+      walletDebitService ?? new WalletDebitService(this.prisma);
     this.batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
     this.pollingIntervalSeconds =
       options.pollingIntervalSeconds ?? DEFAULT_POLL_INTERVAL_SECONDS;
@@ -126,9 +131,10 @@ export class PricingEngineWorker {
 
     const result = await this.engine.priceEvent(event);
 
-    await this.prisma.$transaction(async (tx) => {
+    const createdIds = await this.prisma.$transaction(async (tx) => {
+      const ids: string[] = [];
       for (const item of result.lineItems) {
-        await tx.billableLineItem.create({
+        const created = await tx.billableLineItem.create({
           data: {
             appId: item.appId,
             billToId: item.billToId,
@@ -145,13 +151,24 @@ export class PricingEngineWorker {
               item.inputsSnapshot as Prisma.InputJsonValue,
           },
         });
+        ids.push(created.id);
       }
 
       await tx.usageEvent.update({
         where: { id: event.id },
         data: { pricedAt: new Date() },
       });
+
+      return ids;
     });
+
+    // After transaction commits, trigger immediate wallet debit for each
+    // created line item. WalletDebitService.debitImmediate internally checks
+    // whether the team is in WALLET mode and the line item is CUSTOMER-kind,
+    // so it is safe to call for all created items.
+    for (const lineItemId of createdIds) {
+      await this.walletDebitService.debitImmediate(lineItemId);
+    }
 
     return true;
   }
