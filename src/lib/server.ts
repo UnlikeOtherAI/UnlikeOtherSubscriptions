@@ -19,6 +19,8 @@ import { ledgerRoutes } from "../routes/ledger.js";
 import { topupRoutes } from "../routes/topup.js";
 import { invoiceRoutes } from "../routes/invoices.js";
 import { usageReportingRoutes } from "../routes/usage-reporting.js";
+import { schemaDiscoveryRoutes } from "../routes/schema-discovery.js";
+import { capabilitiesRoutes } from "../routes/capabilities.js";
 import { disconnectPrisma } from "./prisma.js";
 import { stopBoss } from "./pg-boss.js";
 
@@ -55,6 +57,8 @@ export function buildServer(): FastifyInstance {
   app.register(ledgerRoutes);
   app.register(invoiceRoutes);
   app.register(usageReportingRoutes);
+  app.register(schemaDiscoveryRoutes);
+  app.register(capabilitiesRoutes);
   app.register(webhookRoutes);
 
   app.addHook("onClose", async () => {
