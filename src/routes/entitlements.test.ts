@@ -20,6 +20,7 @@ const { mockPrisma } = vi.hoisted(() => ({
     app: { findUnique: vi.fn() },
     team: { findUnique: vi.fn() },
     teamSubscription: { findFirst: vi.fn() },
+    contract: { findFirst: vi.fn() },
     appSecret: { findUnique: vi.fn() },
     jtiUsage: { create: vi.fn() },
     $disconnect: vi.fn(),
@@ -39,6 +40,9 @@ vi.mock("../lib/crypto.js", () => ({
 }));
 
 function setupMocks(): void {
+  // Default: no active enterprise contract
+  mockPrisma.contract.findFirst.mockResolvedValue(null);
+
   mockPrisma.app.findUnique.mockImplementation(
     ({ where }: { where: { id: string } }) => {
       if (where.id === TEST_APP_ID) {
