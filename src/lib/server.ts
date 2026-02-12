@@ -13,6 +13,8 @@ import { portalRoutes } from "../routes/portal.js";
 import { entitlementRoutes } from "../routes/entitlements.js";
 import { webhookRoutes } from "../routes/webhook.js";
 import { usageEventRoutes } from "../routes/usage-events.js";
+import { contractRoutes } from "../routes/contracts.js";
+import { bundleRoutes } from "../routes/bundles.js";
 import { disconnectPrisma } from "./prisma.js";
 import { stopBoss } from "./pg-boss.js";
 
@@ -43,6 +45,8 @@ export function buildServer(): FastifyInstance {
   app.register(portalRoutes);
   app.register(entitlementRoutes);
   app.register(usageEventRoutes);
+  app.register(contractRoutes);
+  app.register(bundleRoutes);
   app.register(webhookRoutes);
 
   app.addHook("onClose", async () => {
