@@ -140,7 +140,7 @@ function setupMocks(): void {
   );
 }
 
-describe("POST /v1/admin/contracts", () => {
+describe("PUT /v1/admin/contracts/:id/overrides", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -156,117 +156,7 @@ describe("POST /v1/admin/contracts", () => {
     delete process.env.ADMIN_API_KEY;
   });
 
-  it("creates a contract in DRAFT status", async () => {
-    const response = await app.inject({
-      method: "POST",
-      url: "/v1/admin/contracts",
-      headers: adminHeaders(),
-      payload: {
-        billToId: BILLING_ENTITY_ID,
-        bundleId: BUNDLE_ID,
-        currency: "USD",
-        billingPeriod: "MONTHLY",
-        termsDays: 30,
-        pricingMode: "FIXED",
-        startsAt: "2025-01-01T00:00:00.000Z",
-      },
-    });
-
-    expect(response.statusCode).toBe(201);
-    const body = response.json();
-    expect(body.id).toBeDefined();
-    expect(body.status).toBe("DRAFT");
-    expect(body.billToId).toBe(BILLING_ENTITY_ID);
-    expect(body.bundleId).toBe(BUNDLE_ID);
-  });
-
-  it("returns 404 for nonexistent billToId", async () => {
-    const response = await app.inject({
-      method: "POST",
-      url: "/v1/admin/contracts",
-      headers: adminHeaders(),
-      payload: {
-        billToId: uuidv4(),
-        bundleId: BUNDLE_ID,
-        currency: "USD",
-        billingPeriod: "MONTHLY",
-        termsDays: 30,
-        pricingMode: "FIXED",
-        startsAt: "2025-01-01T00:00:00.000Z",
-      },
-    });
-
-    expect(response.statusCode).toBe(404);
-    expect(response.json().message).toBe("BillingEntity not found");
-  });
-
-  it("returns 404 for nonexistent bundleId", async () => {
-    const response = await app.inject({
-      method: "POST",
-      url: "/v1/admin/contracts",
-      headers: adminHeaders(),
-      payload: {
-        billToId: BILLING_ENTITY_ID,
-        bundleId: uuidv4(),
-        currency: "USD",
-        billingPeriod: "MONTHLY",
-        termsDays: 30,
-        pricingMode: "FIXED",
-        startsAt: "2025-01-01T00:00:00.000Z",
-      },
-    });
-
-    expect(response.statusCode).toBe(404);
-    expect(response.json().message).toBe("Bundle not found");
-  });
-
-  it("returns 400 for invalid payload", async () => {
-    const response = await app.inject({
-      method: "POST",
-      url: "/v1/admin/contracts",
-      headers: adminHeaders(),
-      payload: { billToId: "not-a-uuid" },
-    });
-
-    expect(response.statusCode).toBe(400);
-  });
-
-  it("returns 403 without admin API key", async () => {
-    const response = await app.inject({
-      method: "POST",
-      url: "/v1/admin/contracts",
-      payload: {
-        billToId: BILLING_ENTITY_ID,
-        bundleId: BUNDLE_ID,
-        currency: "USD",
-        billingPeriod: "MONTHLY",
-        termsDays: 30,
-        pricingMode: "FIXED",
-        startsAt: "2025-01-01T00:00:00.000Z",
-      },
-    });
-
-    expect(response.statusCode).toBe(403);
-  });
-});
-
-describe("PATCH /v1/admin/contracts/:id", () => {
-  let app: FastifyInstance;
-
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    process.env.ADMIN_API_KEY = TEST_ADMIN_API_KEY;
-    setupMocks();
-    app = buildContractTestApp();
-    await app.ready();
-  });
-
-  afterEach(async () => {
-    await app.close();
-    delete process.env.ADMIN_API_KEY;
-  });
-
-  it("activates a contract when no other ACTIVE contract exists", async () => {
+  it("replaces all overrides for a contract", async () => {
     const createResp = await app.inject({
       method: "POST",
       url: "/v1/admin/contracts",
@@ -283,88 +173,88 @@ describe("PATCH /v1/admin/contracts/:id", () => {
     });
     const contractId = createResp.json().id;
 
+    const overrideData = [
+      {
+        appId: TEST_APP_ID,
+        meterKey: "llm.tokens.in",
+        limitType: "INCLUDED" as const,
+        includedAmount: 5000000,
+        enforcement: "HARD" as const,
+        overageBilling: "PER_UNIT" as const,
+      },
+    ];
+
+    mockPrisma.contractOverride.findMany.mockResolvedValue(
+      overrideData.map((o) => ({
+        id: uuidv4(),
+        contractId,
+        ...o,
+        featureFlags: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })),
+    );
+
     const response = await app.inject({
-      method: "PATCH",
-      url: `/v1/admin/contracts/${contractId}`,
+      method: "PUT",
+      url: `/v1/admin/contracts/${contractId}/overrides`,
       headers: adminHeaders(),
-      payload: { status: "ACTIVE" },
+      payload: overrideData,
     });
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.status).toBe("ACTIVE");
-  });
-
-  it("returns 409 when activating a second contract for same billToId", async () => {
-    const createResp1 = await app.inject({
-      method: "POST",
-      url: "/v1/admin/contracts",
-      headers: adminHeaders(),
-      payload: {
-        billToId: BILLING_ENTITY_ID,
-        bundleId: BUNDLE_ID,
-        currency: "USD",
-        billingPeriod: "MONTHLY",
-        termsDays: 30,
-        pricingMode: "FIXED",
-        startsAt: "2025-01-01T00:00:00.000Z",
-      },
-    });
-    const contract1Id = createResp1.json().id;
-
-    await app.inject({
-      method: "PATCH",
-      url: `/v1/admin/contracts/${contract1Id}`,
-      headers: adminHeaders(),
-      payload: { status: "ACTIVE" },
-    });
-
-    const createResp2 = await app.inject({
-      method: "POST",
-      url: "/v1/admin/contracts",
-      headers: adminHeaders(),
-      payload: {
-        billToId: BILLING_ENTITY_ID,
-        bundleId: BUNDLE_ID,
-        currency: "USD",
-        billingPeriod: "QUARTERLY",
-        termsDays: 60,
-        pricingMode: "FIXED_PLUS_TRUEUP",
-        startsAt: "2025-06-01T00:00:00.000Z",
-      },
-    });
-    const contract2Id = createResp2.json().id;
-
-    mockPrisma.contract.findFirst.mockResolvedValue({
-      id: contract1Id,
-      billToId: BILLING_ENTITY_ID,
-      status: "ACTIVE",
-    });
-
-    const response = await app.inject({
-      method: "PATCH",
-      url: `/v1/admin/contracts/${contract2Id}`,
-      headers: adminHeaders(),
-      payload: { status: "ACTIVE" },
-    });
-
-    expect(response.statusCode).toBe(409);
-    expect(response.json().error).toBe("Conflict");
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBe(1);
+    expect(body[0].meterKey).toBe("llm.tokens.in");
+    expect(body[0].limitType).toBe("INCLUDED");
   });
 
   it("returns 404 for nonexistent contract", async () => {
     const response = await app.inject({
-      method: "PATCH",
-      url: `/v1/admin/contracts/${uuidv4()}`,
+      method: "PUT",
+      url: `/v1/admin/contracts/${uuidv4()}/overrides`,
       headers: adminHeaders(),
-      payload: { status: "ACTIVE" },
+      payload: [],
     });
 
     expect(response.statusCode).toBe(404);
-    expect(response.json().message).toBe("Contract not found");
   });
 
-  it("updates pricingMode on a contract", async () => {
+  it("clears all overrides when empty array provided", async () => {
+    const createResp = await app.inject({
+      method: "POST",
+      url: "/v1/admin/contracts",
+      headers: adminHeaders(),
+      payload: {
+        billToId: BILLING_ENTITY_ID,
+        bundleId: BUNDLE_ID,
+        currency: "USD",
+        billingPeriod: "MONTHLY",
+        termsDays: 30,
+        pricingMode: "FIXED",
+        startsAt: "2025-01-01T00:00:00.000Z",
+      },
+    });
+    const contractId = createResp.json().id;
+
+    mockPrisma.contractOverride.findMany.mockResolvedValue([]);
+
+    const response = await app.inject({
+      method: "PUT",
+      url: `/v1/admin/contracts/${contractId}/overrides`,
+      headers: adminHeaders(),
+      payload: [],
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([]);
+    expect(mockPrisma.contractOverride.deleteMany).toHaveBeenCalledWith({
+      where: { contractId },
+    });
+  });
+
+  it("returns 400 for invalid override data", async () => {
     const createResp = await app.inject({
       method: "POST",
       url: "/v1/admin/contracts",
@@ -382,13 +272,12 @@ describe("PATCH /v1/admin/contracts/:id", () => {
     const contractId = createResp.json().id;
 
     const response = await app.inject({
-      method: "PATCH",
-      url: `/v1/admin/contracts/${contractId}`,
+      method: "PUT",
+      url: `/v1/admin/contracts/${contractId}/overrides`,
       headers: adminHeaders(),
-      payload: { pricingMode: "MIN_COMMIT_TRUEUP" },
+      payload: [{ appId: "not-a-uuid", meterKey: "" }],
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json().pricingMode).toBe("MIN_COMMIT_TRUEUP");
+    expect(response.statusCode).toBe(400);
   });
 });

@@ -8,6 +8,8 @@ import { registerJwtAuth } from "../middleware/jwt-auth.js";
 import { contractRoutes } from "./contracts.js";
 import { bundleRoutes } from "./bundles.js";
 
+export const TEST_ADMIN_API_KEY = "test-admin-api-key-secret";
+
 export function base64UrlEncode(data: string | Buffer): string {
   const buf = typeof data === "string" ? Buffer.from(data) : data;
   return buf
@@ -44,6 +46,10 @@ export function createTestJwt(
     .update(`${headerB64}.${payloadB64}`)
     .digest();
   return `${headerB64}.${payloadB64}.${base64UrlEncode(signature)}`;
+}
+
+export function adminHeaders(): Record<string, string> {
+  return { "x-admin-api-key": TEST_ADMIN_API_KEY };
 }
 
 export function buildContractTestApp(): FastifyInstance {

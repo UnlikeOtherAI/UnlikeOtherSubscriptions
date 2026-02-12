@@ -60,7 +60,7 @@ const replaceOverridesBodySchema = z.array(overrideItemSchema);
 export async function contractRoutes(app: FastifyInstance): Promise<void> {
   const contractService = new ContractService();
 
-  app.post("/v1/contracts", async (request, reply) => {
+  app.post("/v1/admin/contracts", async (request, reply) => {
     const body = createContractBodySchema.parse(request.body);
 
     try {
@@ -87,7 +87,7 @@ export async function contractRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.patch("/v1/contracts/:id", async (request, reply) => {
+  app.patch("/v1/admin/contracts/:id", async (request, reply) => {
     const params = contractIdParamSchema.parse(request.params);
     const body = updateContractBodySchema.parse(request.body);
 
@@ -115,7 +115,7 @@ export async function contractRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.put("/v1/contracts/:id/overrides", async (request, reply) => {
+  app.put("/v1/admin/contracts/:id/overrides", async (request, reply) => {
     const params = contractIdParamSchema.parse(request.params);
     const body = replaceOverridesBodySchema.parse(request.body);
 

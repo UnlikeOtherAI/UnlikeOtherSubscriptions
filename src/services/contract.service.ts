@@ -137,20 +137,34 @@ export class ContractService {
       }
     }
 
-    const contract = await prisma.contract.update({
-      where: { id },
-      data: {
-        ...(input.status !== undefined && { status: input.status }),
-        ...(input.termsDays !== undefined && { termsDays: input.termsDays }),
-        ...(input.pricingMode !== undefined && {
-          pricingMode: input.pricingMode,
-        }),
-      },
-      include: {
-        bundle: true,
-        overrides: true,
-      },
-    });
+    let contract;
+    try {
+      contract = await prisma.contract.update({
+        where: { id },
+        data: {
+          ...(input.status !== undefined && { status: input.status }),
+          ...(input.termsDays !== undefined && { termsDays: input.termsDays }),
+          ...(input.pricingMode !== undefined && {
+            pricingMode: input.pricingMode,
+          }),
+        },
+        include: {
+          bundle: true,
+          overrides: true,
+        },
+      });
+    } catch (err: unknown) {
+      if (
+        err &&
+        typeof err === "object" &&
+        "code" in err &&
+        (err as { code: string }).code === "P2002" &&
+        input.status === "ACTIVE"
+      ) {
+        throw new ActiveContractExistsError(existing.billToId);
+      }
+      throw err;
+    }
 
     // Trigger entitlement recomputation for affected teams
     if (existing.billingEntity?.team) {

@@ -1,15 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { FastifyInstance } from "fastify";
-import { randomBytes } from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
 import {
-  createTestJwt,
   buildContractTestApp,
+  adminHeaders,
+  TEST_ADMIN_API_KEY,
 } from "./contracts-test-helpers.js";
 
-const TEST_ENCRYPTION_KEY = randomBytes(32).toString("hex");
-const TEST_SECRET = randomBytes(32).toString("hex");
-const TEST_KID = `kid_${uuidv4().replace(/-/g, "")}`;
 const TEST_APP_ID = uuidv4();
 
 const bundles = new Map<string, Record<string, unknown>>();
@@ -46,23 +43,6 @@ function setupMocks(): void {
   bundleApps.clear();
   bundlePolicies.clear();
 
-  mockPrisma.appSecret.findUnique.mockImplementation(
-    ({ where }: { where: { kid: string } }) => {
-      if (where.kid === TEST_KID) {
-        return Promise.resolve({
-          id: uuidv4(),
-          appId: TEST_APP_ID,
-          kid: TEST_KID,
-          secretHash: `encrypted:${TEST_SECRET}`,
-          status: "ACTIVE",
-        });
-      }
-      return Promise.resolve(null);
-    },
-  );
-
-  mockPrisma.jtiUsage.create.mockResolvedValue({});
-
   mockPrisma.$transaction.mockImplementation(
     async (fn: (tx: typeof mockPrisma) => Promise<unknown>) => {
       return fn(mockPrisma);
@@ -71,7 +51,6 @@ function setupMocks(): void {
 
   mockPrisma.bundle.create.mockImplementation(
     ({ data }: { data: { code: string; name: string } }) => {
-      // Check for duplicate code
       for (const b of bundles.values()) {
         if (b.code === data.code) {
           const err = new Error("Unique constraint failed") as Error & { code: string };
@@ -161,17 +140,12 @@ function setupMocks(): void {
   mockPrisma.contract.findMany.mockResolvedValue([]);
 }
 
-function authHeaders(): Record<string, string> {
-  const jwt = createTestJwt(TEST_SECRET, TEST_KID, TEST_APP_ID);
-  return { authorization: `Bearer ${jwt}` };
-}
-
-describe("POST /v1/bundles", () => {
+describe("POST /v1/admin/bundles", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    process.env.SECRETS_ENCRYPTION_KEY = TEST_ENCRYPTION_KEY;
+    process.env.ADMIN_API_KEY = TEST_ADMIN_API_KEY;
     setupMocks();
     app = buildContractTestApp();
     await app.ready();
@@ -179,14 +153,14 @@ describe("POST /v1/bundles", () => {
 
   afterEach(async () => {
     await app.close();
-    delete process.env.SECRETS_ENCRYPTION_KEY;
+    delete process.env.ADMIN_API_KEY;
   });
 
   it("creates a bundle with apps and meter policies", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/v1/bundles",
-      headers: authHeaders(),
+      url: "/v1/admin/bundles",
+      headers: adminHeaders(),
       payload: {
         code: "enterprise_all",
         name: "Enterprise All Apps",
@@ -220,8 +194,8 @@ describe("POST /v1/bundles", () => {
   it("creates a bundle without apps or policies", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/v1/bundles",
-      headers: authHeaders(),
+      url: "/v1/admin/bundles",
+      headers: adminHeaders(),
       payload: {
         code: "basic_bundle",
         name: "Basic Bundle",
@@ -238,8 +212,8 @@ describe("POST /v1/bundles", () => {
   it("returns 409 for duplicate bundle code", async () => {
     await app.inject({
       method: "POST",
-      url: "/v1/bundles",
-      headers: authHeaders(),
+      url: "/v1/admin/bundles",
+      headers: adminHeaders(),
       payload: {
         code: "duplicate_code",
         name: "First Bundle",
@@ -248,8 +222,8 @@ describe("POST /v1/bundles", () => {
 
     const response = await app.inject({
       method: "POST",
-      url: "/v1/bundles",
-      headers: authHeaders(),
+      url: "/v1/admin/bundles",
+      headers: adminHeaders(),
       payload: {
         code: "duplicate_code",
         name: "Second Bundle",
@@ -263,34 +237,34 @@ describe("POST /v1/bundles", () => {
   it("returns 400 for missing required fields", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/v1/bundles",
-      headers: authHeaders(),
+      url: "/v1/admin/bundles",
+      headers: adminHeaders(),
       payload: { name: "No Code" },
     });
 
     expect(response.statusCode).toBe(400);
   });
 
-  it("returns 401 without authorization header", async () => {
+  it("returns 403 without admin API key", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/v1/bundles",
+      url: "/v1/admin/bundles",
       payload: {
         code: "test",
         name: "Test",
       },
     });
 
-    expect(response.statusCode).toBe(401);
+    expect(response.statusCode).toBe(403);
   });
 });
 
-describe("PATCH /v1/bundles/:id", () => {
+describe("PATCH /v1/admin/bundles/:id", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    process.env.SECRETS_ENCRYPTION_KEY = TEST_ENCRYPTION_KEY;
+    process.env.ADMIN_API_KEY = TEST_ADMIN_API_KEY;
     setupMocks();
     app = buildContractTestApp();
     await app.ready();
@@ -298,14 +272,14 @@ describe("PATCH /v1/bundles/:id", () => {
 
   afterEach(async () => {
     await app.close();
-    delete process.env.SECRETS_ENCRYPTION_KEY;
+    delete process.env.ADMIN_API_KEY;
   });
 
   it("updates bundle apps", async () => {
     const createResp = await app.inject({
       method: "POST",
-      url: "/v1/bundles",
-      headers: authHeaders(),
+      url: "/v1/admin/bundles",
+      headers: adminHeaders(),
       payload: {
         code: "updatable_bundle",
         name: "Updatable Bundle",
@@ -317,8 +291,8 @@ describe("PATCH /v1/bundles/:id", () => {
     const newAppId = uuidv4();
     const response = await app.inject({
       method: "PATCH",
-      url: `/v1/bundles/${bundleId}`,
-      headers: authHeaders(),
+      url: `/v1/admin/bundles/${bundleId}`,
+      headers: adminHeaders(),
       payload: {
         apps: [
           { appId: TEST_APP_ID },
@@ -335,8 +309,8 @@ describe("PATCH /v1/bundles/:id", () => {
   it("updates bundle meter policies", async () => {
     const createResp = await app.inject({
       method: "POST",
-      url: "/v1/bundles",
-      headers: authHeaders(),
+      url: "/v1/admin/bundles",
+      headers: adminHeaders(),
       payload: {
         code: "policy_update_bundle",
         name: "Policy Update Bundle",
@@ -346,8 +320,8 @@ describe("PATCH /v1/bundles/:id", () => {
 
     const response = await app.inject({
       method: "PATCH",
-      url: `/v1/bundles/${bundleId}`,
-      headers: authHeaders(),
+      url: `/v1/admin/bundles/${bundleId}`,
+      headers: adminHeaders(),
       payload: {
         meterPolicies: [
           {
@@ -371,8 +345,8 @@ describe("PATCH /v1/bundles/:id", () => {
   it("returns 404 for nonexistent bundle", async () => {
     const response = await app.inject({
       method: "PATCH",
-      url: `/v1/bundles/${uuidv4()}`,
-      headers: authHeaders(),
+      url: `/v1/admin/bundles/${uuidv4()}`,
+      headers: adminHeaders(),
       payload: { name: "Updated" },
     });
 
@@ -383,8 +357,8 @@ describe("PATCH /v1/bundles/:id", () => {
   it("updates bundle name", async () => {
     const createResp = await app.inject({
       method: "POST",
-      url: "/v1/bundles",
-      headers: authHeaders(),
+      url: "/v1/admin/bundles",
+      headers: adminHeaders(),
       payload: {
         code: "rename_bundle",
         name: "Original Name",
@@ -394,8 +368,8 @@ describe("PATCH /v1/bundles/:id", () => {
 
     const response = await app.inject({
       method: "PATCH",
-      url: `/v1/bundles/${bundleId}`,
-      headers: authHeaders(),
+      url: `/v1/admin/bundles/${bundleId}`,
+      headers: adminHeaders(),
       payload: { name: "Updated Name" },
     });
 
