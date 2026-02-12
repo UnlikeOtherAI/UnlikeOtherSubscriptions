@@ -222,6 +222,23 @@ describe("createBillingClient", () => {
       expect(result.sessionId).toBe("cs_test_abc");
     });
 
+    it("returns checkout result with only url (sessionId is optional)", async () => {
+      globalThis.fetch = mockFetch({
+        status: 200,
+        body: { url: "https://checkout.stripe.com/c/pay_xyz" },
+      });
+
+      const client = createBillingClient(TEST_CONFIG);
+      const result = await client.createCheckout("team_xyz", {
+        planCode: "starter",
+        successUrl: "https://app.example.com/success",
+        cancelUrl: "https://app.example.com/cancel",
+      });
+
+      expect(result.url).toBe("https://checkout.stripe.com/c/pay_xyz");
+      expect(result.sessionId).toBeUndefined();
+    });
+
     it("sends seat quantity to Stripe line items", async () => {
       const fetchMock = mockFetch({
         status: 200,
@@ -305,6 +322,81 @@ describe("createBillingClient", () => {
           cancelUrl: "https://example.com/cancel",
         })
       ).rejects.toThrow(BillingValidationError);
+    });
+  });
+
+  describe("expired and revoked secret handling", () => {
+    it("throws BillingApiError with status 401 for expired JWT", async () => {
+      globalThis.fetch = mockFetch({
+        status: 401,
+        body: { message: "JWT has expired", statusCode: 401, error: "Unauthorized" },
+        headers: { "x-request-id": "req_expired_jwt" },
+      });
+
+      const client = createBillingClient(TEST_CONFIG);
+
+      try {
+        await client.getEntitlements("team_xyz");
+        expect.fail("should have thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(BillingApiError);
+        const apiErr = err as BillingApiError;
+        expect(apiErr.statusCode).toBe(401);
+        expect(apiErr.message).toBe("JWT has expired");
+        expect(apiErr.requestId).toBe("req_expired_jwt");
+        expect(apiErr.name).toBe("BillingApiError");
+      }
+    });
+
+    it("throws BillingApiError with status 401 for revoked secret (kid)", async () => {
+      globalThis.fetch = mockFetch({
+        status: 401,
+        body: { message: "Secret has been revoked", statusCode: 401, error: "Unauthorized" },
+        headers: { "x-request-id": "req_revoked_kid" },
+      });
+
+      const client = createBillingClient(TEST_CONFIG);
+
+      try {
+        await client.reportUsage([
+          {
+            idempotencyKey: "evt_revoked",
+            eventType: "llm.tokens.v1",
+            timestamp: "2025-01-01T00:00:00Z",
+            teamId: "team_xyz",
+            payload: { provider: "openai", model: "gpt-5", inputTokens: 100, outputTokens: 50 },
+            source: "test/1.0.0",
+          },
+        ]);
+        expect.fail("should have thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(BillingApiError);
+        const apiErr = err as BillingApiError;
+        expect(apiErr.statusCode).toBe(401);
+        expect(apiErr.message).toBe("Secret has been revoked");
+        expect(apiErr.requestId).toBe("req_revoked_kid");
+      }
+    });
+
+    it("does not retry 401 errors", async () => {
+      const fetchMock = mockFetch({
+        status: 401,
+        body: { message: "Unauthorized", statusCode: 401 },
+      });
+      globalThis.fetch = fetchMock;
+
+      const client = createBillingClient({ ...TEST_CONFIG, maxRetries: 3 });
+
+      await expect(
+        client.createCheckout("team_xyz", {
+          planCode: "pro",
+          successUrl: "https://app.example.com/success",
+          cancelUrl: "https://app.example.com/cancel",
+        })
+      ).rejects.toThrow(BillingApiError);
+
+      // 401 is not a retryable status code, so only 1 call should be made
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 

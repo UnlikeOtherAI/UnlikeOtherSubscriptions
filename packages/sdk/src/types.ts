@@ -73,7 +73,7 @@ export interface CreateCheckoutOptions {
 /** Response from checkout creation. */
 export interface CreateCheckoutResult {
   url: string;
-  sessionId: string;
+  sessionId?: string;
 }
 
 /** JWT claims structure matching the billing service expectations. */
