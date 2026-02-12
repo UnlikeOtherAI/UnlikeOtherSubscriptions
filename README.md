@@ -85,12 +85,20 @@ All API endpoints (except Stripe webhooks) require a signed JWT:
 # Install dependencies
 npm install
 
-# Set up database
+# Validate the Prisma schema
+npx prisma validate
+
+# Generate Prisma Client
+npx prisma generate
+
+# Run database migrations
 npx prisma migrate dev
 
 # Start the service
 npm run dev
 ```
+
+> **Note:** The Prisma schema is split into modules under `prisma/schema/` for maintainability. Schema discovery is configured centrally via the `"prisma"` key in `package.json`, so all `npx prisma` commands work from the project root without extra flags.
 
 ## Releases
 

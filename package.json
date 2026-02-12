@@ -30,6 +30,9 @@
     "@typescript-eslint/eslint-plugin": "^8.22.0",
     "@typescript-eslint/parser": "^8.22.0"
   },
+  "prisma": {
+    "schema": "prisma/schema"
+  },
   "engines": {
     "node": ">=20.0.0"
   }
