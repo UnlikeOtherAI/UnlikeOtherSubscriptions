@@ -256,6 +256,24 @@ describe("POST /v1/apps/:appId/teams/:teamId/checkout/topup", () => {
     });
   });
 
+  it("sets payment_intent_data.metadata so payment_intent.succeeded can process top-ups", async () => {
+    await app.inject({
+      method: "POST",
+      url: TOPUP_URL,
+      payload: VALID_PAYLOAD,
+      headers: authHeaders(),
+    });
+
+    const args = mockCheckoutSessionCreate.mock.calls[0][0];
+    expect(args.payment_intent_data).toBeDefined();
+    expect(args.payment_intent_data.metadata).toEqual({
+      teamId: TEST_TEAM_ID,
+      appId: TEST_APP_ID,
+      type: "wallet_topup",
+      amountMinor: "5000",
+    });
+  });
+
   it("rejects requests for teams that do not exist (404)", async () => {
     const nonexistentTeamId = uuidv4();
     mockPrisma.team.findUnique.mockImplementation(

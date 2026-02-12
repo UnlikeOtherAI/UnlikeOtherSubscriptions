@@ -63,6 +63,14 @@ export class TopupService {
         type: "wallet_topup",
         amountMinor: String(input.amountMinor),
       },
+      payment_intent_data: {
+        metadata: {
+          teamId: input.teamId,
+          appId: input.appId,
+          type: "wallet_topup",
+          amountMinor: String(input.amountMinor),
+        },
+      },
     });
 
     return {
